@@ -27,12 +27,8 @@
  *
  * @vitest-environment node
  */
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { createServer } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createApp, FileSystemBackend } from 'was-teaching-server'
+import { openTempBackend, startTestServer } from 'was-teaching-server/testing'
 import type { WithDeleted } from 'rxdb/plugins/core'
 import { provisionDevGrants } from '../../src/dev/provisionDevGrants.js'
 import { parseGrants } from '../../src/grants.js'
@@ -83,40 +79,22 @@ interface Sealed {
   epoch?: string
 }
 
-/**
- * An OS-assigned free TCP port (bound and released before the server starts).
- */
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer()
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      probe.close(() => {
-        if (address !== null && typeof address === 'object') {
-          resolve(address.port)
-        } else {
-          reject(new Error('No port assigned.'))
-        }
-      })
-    })
-  })
-}
-
-let dataDir: string
-let app: Awaited<ReturnType<typeof createApp>>
+let server: Awaited<ReturnType<typeof startTestServer>> | undefined
 let remoteStore: WasRemoteStore
 let cipher: DocCipher
 let port: WasSyncPort
 
 beforeAll(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), 'was-react-conditional-'))
-  const listenPort = await freePort()
-  const serverUrl = `http://localhost:${listenPort}`
-  app = createApp({
-    serverUrl,
-    backend: new FileSystemBackend({ dataDir, capacityBytes: Infinity })
+  // The server owns the temp backend, so closing it removes the data dir.
+  // Zcap invocation targets embed the port, so every client is built from the
+  // `serverUrl` the boot returns.
+  server = await startTestServer({
+    backend: await openTempBackend({
+      prefix: 'was-react-conditional-',
+      capacityBytes: Infinity
+    })
   })
-  await app.listen({ port: listenPort, host: '0.0.0.0' })
+  const { serverUrl } = server
 
   const provisioned = await provisionDevGrants({
     serverUrl,
@@ -158,8 +136,7 @@ beforeAll(async () => {
 }, 60000)
 
 afterAll(async () => {
-  await app?.close()
-  await rm(dataDir, { recursive: true, force: true })
+  await server?.fastify.close()
 }, 60000)
 
 /**

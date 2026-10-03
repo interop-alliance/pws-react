@@ -7,6 +7,8 @@
 - Docs: the party that asks a wallet for grants is the "requester" (an app,
   service, or agent), replacing "relying party" / "RP" in JSDoc, README, and
   ARCHITECTURE.md. Here the requester is the app running this library.
+- Tests: the in-process server suites boot through `was-teaching-server/testing`
+  (`startTestServer`, `openTempBackend`), against the server's 0.40.0 release.
 
 ## 0.26.0 - 2026-09-27
 

@@ -12,12 +12,8 @@
  * @vitest-environment node
  */
 import 'fake-indexeddb/auto'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { createServer } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createApp, FileSystemBackend } from 'was-teaching-server'
+import { openTempBackend, startTestServer } from 'was-teaching-server/testing'
 import { provisionDevGrants } from '../../src/dev/provisionDevGrants.js'
 import { parseGrants, type ParsedGrants } from '../../src/grants.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
@@ -70,25 +66,6 @@ function makeDoc(title: string): PostDoc {
 }
 
 /**
- * An OS-assigned free TCP port (bound and released before the server starts).
- */
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer()
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      probe.close(() => {
-        if (address !== null && typeof address === 'object') {
-          resolve(address.port)
-        } else {
-          reject(new Error('No port assigned.'))
-        }
-      })
-    })
-  })
-}
-
-/**
  * Polls `probe` until it resolves non-null (errors count as null) or the
  * timeout elapses.
  */
@@ -110,8 +87,7 @@ async function waitFor<T>(
   }
 }
 
-let dataDir: string
-let app: Awaited<ReturnType<typeof createApp>>
+let server: Awaited<ReturnType<typeof startTestServer>> | undefined
 let serverUrl: string
 let parsed: ParsedGrants
 let zcapClient: ZcapClient
@@ -124,14 +100,16 @@ const post = makeDoc('A world-readable post')
 const note = makeDoc('secret-note-marker')
 
 beforeAll(async () => {
-  dataDir = await mkdtemp(join(tmpdir(), 'was-react-plaintext-'))
-  const port = await freePort()
-  serverUrl = `http://localhost:${port}`
-  app = createApp({
-    serverUrl,
-    backend: new FileSystemBackend({ dataDir, capacityBytes: Infinity })
+  // The server owns the temp backend, so closing it removes the data dir.
+  // Zcap invocation targets embed the port, so every client is built from the
+  // `serverUrl` the boot returns.
+  server = await startTestServer({
+    backend: await openTempBackend({
+      prefix: 'was-react-plaintext-',
+      capacityBytes: Infinity
+    })
   })
-  await app.listen({ port, host: '0.0.0.0' })
+  ;({ serverUrl } = server)
 
   const provisioned = await provisionDevGrants({
     serverUrl,
@@ -149,8 +127,7 @@ afterAll(async () => {
   for (const store of stores) {
     await store.close()
   }
-  await app.close()
-  await rm(dataDir, { recursive: true, force: true })
+  await server?.fastify.close()
 }, 60000)
 
 /**
