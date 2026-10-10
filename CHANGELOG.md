@@ -4,6 +4,29 @@
 
 ### Changed
 
+- Depend on `@interop/was-client` 0.94.0 for `parseAbsoluteSpaceTarget`,
+  `allowsAction`, and `isDenialError`.
+
+### Added
+
+- `AudienceReader`, the member-side reader of one plaintext audience collection
+  in another owner's Space, opened on a GET and HEAD zcap and a signer directly
+  (`AudienceReader.open({ zcap, signer, checkpoint?, pageSize? })`). The client
+  is built from the zcap's own `invocationTarget` (was-client's
+  `parseAbsoluteSpaceTarget`), so the audience may live on another host.
+  `pull()` follows the `changes` feed through its GET form from a per-reader
+  checkpoint that moves only with the changes a pull returns, keeps
+  `kind: 'resource'` entries only, replays from the start on a refused
+  checkpoint, and falls back to the listing plus one GET per resource on a 405
+  or 501 (both `snapshot: true`). A denial (401, 403, or the masked 404 with its
+  `capability-revoked` / `capability-expired` causes, on the feed or settled
+  against the container after a null body read) pauses the reader with its
+  checkpoint kept; `replaceCapability({ zcap })` resumes it, and a denial of a
+  request in flight under the replaced zcap pauses nothing. Exported with
+  `AUDIENCE_CHANGES_PAGE_SIZE`, `AudienceChange`, and `AudiencePull`.
+
+### Changed
+
 - `SharedCollectionReader.list()` reads the widened `changes` feed through
   was-client's `Collection.documents()` walk instead of paging the feed itself.
   Only `kind: 'resource'` entries with JSON content are kept; the Collection's

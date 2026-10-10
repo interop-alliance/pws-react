@@ -163,6 +163,12 @@ export {
   SHARED_CHANGES_PAGE_SIZE,
   type SharedResource
 } from './storage/sharedCollectionReader.js'
+export {
+  AudienceReader,
+  AUDIENCE_CHANGES_PAGE_SIZE,
+  type AudienceChange,
+  type AudiencePull
+} from './storage/audienceReader.js'
 export { publicUrlFor } from './storage/publicUrl.js'
 export {
   createSyncStatusStore,

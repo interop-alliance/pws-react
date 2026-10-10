@@ -206,6 +206,31 @@ failing; a collection this app is not a recipient of at all fails at open time
 with a `SharedCollectionUnavailableError`, and the session continues without
 that reader.
 
+#### Audiences
+
+An audience is one plaintext collection in another user's Space that this user
+has been granted a GET and HEAD zcap on. The zcap comes from the subscription
+agent's API rather than from a wallet login, so it is read through an
+`AudienceReader` opened on the zcap directly, with the app's own signer:
+
+```ts
+import { AudienceReader } from '@interop/was-react'
+
+const reader = AudienceReader.open({ zcap, signer, checkpoint: saved })
+const { changes, paused, snapshot } = await reader.pull()
+persist(reader.checkpoint)
+```
+
+`pull()` follows the collection's `changes` feed from the checkpoint and returns
+the live posts (with their bodies) and tombstones since then; the checkpoint
+moves only with the changes a pull returns. When the server has no usable feed,
+or refuses the stored checkpoint, it returns a full read instead
+(`snapshot: true`): every live post is in it, and a post you hold that is not is
+gone. A denied pull (`paused: true`) keeps the checkpoint; hand the reader a
+replacement zcap with `replaceCapability({ zcap })` and the next pull resumes
+from it. Merge audiences by the stable post id in the post body, not by resource
+id.
+
 ### 2. Entity stores and the registry
 
 ```ts

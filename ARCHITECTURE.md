@@ -577,6 +577,80 @@ with a warning and never the session.
 The other standing limit is the one the wallet states too: removing access stops
 future reads but cannot take back what has already been read.
 
+### Audiences: `AudienceReader`
+
+An audience is a fourth kind of collection from the reader's side, and it gets a
+reader of its own (`src/storage/audienceReader.ts`). It is one plaintext
+collection in another owner's Space, and membership is a GET and HEAD zcap on
+that collection's container. A subscriber holds one `AudienceReader` per
+audience and merges what the readers return by the app's own stable post id,
+which lives in the post body. The resource id is not a stable identity: a post
+that changes audience moves.
+
+The reader is not a `SharedCollectionReader`, and the two are deliberately not
+one. A shared collection is encrypted, so that reader requires an `encryption`
+descriptor and builds a cipher from it; an audience is plaintext. A shared
+collection's fast path walks the POST form of the `changes` feed, which a GET
+and HEAD grant does not reach; the audience reader reads the read-only GET form.
+And a shared collection is resolved through the session's `WasRemoteStore`,
+which holds the one server URL and Space the app's own grants name; an audience
+lives in another owner's Space, possibly on another host, so
+`AudienceReader.open({ zcap, signer })` takes the zcap directly and builds its
+client from the zcap's own `invocationTarget` (was-client's
+`parseAbsoluteSpaceTarget` reads the base URL off it, everything before the
+`space` segment, so a WAS mounted under a sub-path works). The zcap arrives from
+the subscription agent's own API, not in a wallet presentation, which is why
+`parseGrants` and `verifyResponse` know nothing about it.
+
+`pull()` follows the feed from the reader's checkpoint to the end, through
+was-client's `resourceChanges` walk, which drops every entry whose `kind` is not
+`resource`, follows a page the filter empties, ends only on a `null` checkpoint,
+and fails on a checkpoint the server repeats. A live JSON resource's body rides
+the feed inline and is returned as is; a tombstone is returned as
+`deleted: true`, and so is a live resource rewritten to a non-JSON type, since
+it is no longer a post. The checkpoint (`reader.checkpoint`, accepted back by
+`open()` so a subscriber can resume across sessions) moves only together with
+the changes a pull returns: a pull that fails for any reason other than a cut
+rejects with the checkpoint where it began, so the next pull re-reads what this
+one could not deliver, and nothing a consumer persists ever runs ahead of what
+it received. Pulls are serialized, since two overlapping walks from one
+checkpoint would hand the consumer the same changes twice. A checkpoint the
+server refuses (a 400 with one in hand, which is what a retired feed layout
+looks like) is dropped and the feed replayed from its start once, reported as a
+snapshot. A server that refuses the GET form (405) or has no feed (501) is read
+through the listing and one GET per resource instead, once warned about and
+remembered for the reader's life. Both of those answer `snapshot: true`: a full
+read rather than a delta, where every live post is present and a post the
+consumer holds that is absent is gone. A denied read is never a snapshot.
+
+The cut contract is the reader's main design point. A generation replacement or
+an annex GC on the owner's side cuts every subscriber child at once, so a denied
+invocation is the routine path, not an error. The reader reports `paused`, keeps
+its checkpoint (on a cut mid-walk, the last fully read page's, beside the
+changes of those pages), answers an empty pull without a request while paused,
+and resumes from the checkpoint once `replaceCapability({ zcap })` hands it a
+replacement for the same target. A zcap for another target is refused, since the
+checkpoint belongs to this collection alone, and so is one that leaves `GET` out
+of its `allowedAction`, which could only pause the reader again. A replacement
+is accepted on a live reader too (a renewal ahead of expiry); every replacement
+bumps a generation, and a denial raised by a request that left under the
+previous zcap pauses nothing, so a renewal racing an in-flight pull cannot leave
+the reader paused with no further zcap coming.
+
+On the wire a denial is a 401 or 403, or the masked 404 WAS answers an
+unauthorized caller with, named `capability-revoked` or `capability-expired`
+when the request itself verified and bare when the chain no longer verifies,
+which is what a collected generation looks like. All of those pause the reader.
+A collection deleted under the reader is the same 404 and pauses it the same
+way; it just never resumes. The feed request surfaces that 404 as a typed error,
+but was-client's body reads (`get`, `list`) answer `null` on any 404, the masked
+denial included, so a null from one of them is ambiguous. A null listing on the
+fallback path is unambiguous, since an empty collection lists as empty rather
+than null, and is the cut. A null body (from `get()`, or for a resource the
+listing just named) is settled by one signed GET of the container through the
+`request` escape hatch, which maps the denial to its typed error: a miss stays a
+miss, and a denial pauses the reader.
+
 ## Storage and sync
 
 `SyncController` (`src/storage/syncController.ts`) is the session binding over
