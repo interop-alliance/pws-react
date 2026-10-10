@@ -4,6 +4,13 @@
 
 ### Changed
 
+- `SharedCollectionReader.list()` reads the widened `changes` feed. It keeps
+  `kind: 'resource'` entries only, skipping `collection-metadata`, `log`, and
+  unknown kinds, and still resumes from each page's checkpoint. A tombstone is
+  read from `deleted` (was `_deleted`). A binary or `text/jsonl` resource is
+  skipped and drops an earlier JSON body for its id. The filter is was-client's
+  re-exported `isResourceChange` / `isJsonResourceChange`. Needs
+  `@interop/was-client` 0.89.0.
 - Docs: the party that asks a wallet for grants is the "requester" (an app,
   service, or agent), replacing "relying party" / "RP" in JSDoc, README, and
   ARCHITECTURE.md. Here the requester is the app running this library.

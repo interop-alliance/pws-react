@@ -165,12 +165,15 @@ const one = await shared?.get(items[0].id)
 `list()` reads the collection by paging the WAS `changes` feed, which returns
 whole pages of documents with their bodies -- and on an encrypted collection
 those bodies are the opaque EDV envelopes the reader wants, since the feed does
-not decrypt. That is one request per page rather than one per credential.
-Tombstones are skipped, so the result is the live set. A backend that does not
-support the `changes-query` feature answers 501; the reader then falls back to
-listing the resource summaries and fetching each body, warning once that the
-collection is being read the slow way. `SharedCollectionReader.open` takes an
-optional `pageSize` (default `SHARED_CHANGES_PAGE_SIZE`, 100).
+not decrypt. That is one request per page rather than one per credential. Only
+the feed's `kind: 'resource'` entries are read. The Collection's own records
+(`collection-metadata`, `log`) and any kind the reader does not know are
+skipped, as are tombstones (`deleted`) and binary or `text/jsonl` resources, so
+the result is the live set of JSON resources. A backend that does not support
+the `changes-query` feature answers 501; the reader then falls back to listing
+the resource summaries and fetching each body, warning once that the collection
+is being read the slow way. `SharedCollectionReader.open` takes an optional
+`pageSize` (default `SHARED_CHANGES_PAGE_SIZE`, 100).
 
 A collection may be app-owned or shared, never both; a registry that declares
 the same `key` or `id` in each is rejected at store open

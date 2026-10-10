@@ -494,10 +494,15 @@ Three kinds, and the distinctions are load-bearing:
 feed -- whole pages of documents with their bodies, undecrypted by the server,
 which is exactly what a reader holding its own keys wants, and the same
 primitive replication pulls with. It costs one request per page rather than one
-per resource, and skips tombstones so the result is the live set. The fallback,
-for a backend without the `changes-query` feature (501, surfaced as
-`NotImplementedError`), lists the resource summaries and fetches each body; it
-warns once per reader that the collection is being read the slow way.
+per resource. The feed carries every record kind of a Collection, so the walk
+keeps `kind: 'resource'` entries only and skips the Collection's own records
+(`collection-metadata`, `log`) and any kind it does not know, while still
+resuming from each page's checkpoint. It also skips tombstones (`deleted`) and
+resources with no inline `data` (binary or `text/jsonl`), so the result is the
+live set of JSON resources. The fallback, for a backend without the
+`changes-query` feature (501, surfaced as `NotImplementedError`), lists the
+resource summaries and fetches each body; it warns once per reader that the
+collection is being read the slow way.
 
 `validateSharedCollections` rejects a collection declared in both registries: a
 collection cannot be app-owned and shared read-only at once.

@@ -322,6 +322,57 @@ describe('SharedCollectionReader.list', () => {
     expect(remoteStore.resourceGets()).toBe(0)
   })
 
+  it('skips every entry but a JSON Resource and resumes past them', async () => {
+    const { app, encryption, encrypt } = await sharedFixture()
+    const first = await encrypt({ id: 'credential-1', title: 'one' })
+    const second = await encrypt({ id: 'credential-2', title: 'two' })
+    const collectionUrl = `https://was.example/space/space-1/${COLLECTION_ID}/`
+
+    const capture = captureLogger('wr')
+    const previous = setLogger(capture.logger)
+    try {
+      const remoteStore = fakeRemoteStore({
+        encryption,
+        resources: {},
+        changes: [
+          // The first page holds no Resource at all, so the walk must still
+          // resume from its checkpoint.
+          { id: `${collectionUrl}meta`, kind: 'collection-metadata' },
+          { id: `${collectionUrl}meta/log`, kind: 'log' },
+          { id: `${collectionUrl}future`, kind: 'future-kind' },
+          { id: 'photo-1', contentType: 'image/png' },
+          { id: first.id, data: first.envelope },
+          { id: second.id, data: second.envelope },
+          // A JSON Resource rewritten to a binary type leaves the live set.
+          { id: second.id, contentType: 'application/octet-stream' },
+          { id: 'photo-1', contentType: 'image/png', deleted: true }
+        ]
+      })
+      const reader = await SharedCollectionReader.open({
+        remoteStore,
+        keyAgreementKey: app.keyAgreementKey,
+        keyResolver: app.keyResolver,
+        collectionId: COLLECTION_ID,
+        pageSize: 2
+      })
+
+      expect(await reader.list()).toEqual([
+        { id: first.id, data: { id: 'credential-1', title: 'one' } }
+      ])
+      expect(remoteStore.checkpointsRequested()).toEqual([
+        undefined,
+        '2',
+        '4',
+        '6',
+        '8'
+      ])
+      // A skipped entry is not read as a body that failed to decrypt.
+      expect(capture.events.filter(event => event.level === 'warn')).toEqual([])
+    } finally {
+      setLogger(previous)
+    }
+  })
+
   it('falls back to listing plus per-resource reads without changes-query', async () => {
     const { app, encryption, encrypt } = await sharedFixture()
     const first = await encrypt({ id: 'credential-1', title: 'one' })
@@ -606,11 +657,15 @@ async function sharedFixture(): Promise<{
 }
 
 /**
- * One entry of the fake `changes` feed: a live document with its stored body,
- * or a tombstone.
+ * One entry of the fake `changes` feed: a Resource (a live document with its
+ * stored body, or a tombstone) by default, or another record `kind` named by
+ * URL. A Resource is JSON unless `contentType` says otherwise, and its `data`
+ * rides inline only while it is live JSON, as on the wire.
  */
 interface FakeChange {
   id: string
+  kind?: string
+  contentType?: string
   data?: unknown
   deleted?: boolean
 }
@@ -644,12 +699,14 @@ function fakeRemoteStore({
 }): WasRemoteStore & {
   encryptionReads: () => number
   resourceGets: () => number
+  checkpointsRequested: () => Array<string | undefined>
 } {
   const feed: FakeChange[] =
     changes ?? Object.entries(resources).map(([id, data]) => ({ id, data }))
   const scripted = descriptors ?? [encryption]
   let encryptionReads = 0
   let resourceGets = 0
+  const checkpointsRequested: Array<string | undefined> = []
 
   const collection = {
     async list() {
@@ -665,7 +722,7 @@ function fakeRemoteStore({
       checkpoint,
       limit
     }: {
-      checkpoint?: { id: string; updatedAt: string }
+      checkpoint?: string
       limit?: number
     }) {
       if (changesNotImplemented) {
@@ -673,27 +730,35 @@ function fakeRemoteStore({
           'This backend does not support the "changes-query" feature.'
         )
       }
+      checkpointsRequested.push(checkpoint)
       // The fake checkpoint is a feed POSITION, not a resource id: the feed can
       // carry the same id twice (a write and its later tombstone), so an
       // id-keyed resume would be ambiguous.
-      const start = checkpoint ? Number(checkpoint.id) : 0
+      const start = checkpoint ? Number(checkpoint) : 0
       const size = limit ?? feed.length
       const page = feed.slice(start, start + size)
       return {
-        documents: page.map(entry => ({
-          id: entry.id,
-          _deleted: entry.deleted === true,
-          updatedAt: '2026-07-30T00:00:00Z',
-          version: 1,
-          ...(entry.data !== undefined && { data: entry.data })
-        })),
-        checkpoint:
-          page.length > 0
-            ? {
-                id: String(start + page.length),
-                updatedAt: '2026-07-30T00:00:00Z'
-              }
-            : null
+        documents: page.map((entry, index) => {
+          const kind = entry.kind ?? 'resource'
+          const deleted = entry.deleted === true
+          const contentType = entry.contentType ?? 'application/json'
+          const liveJson =
+            kind === 'resource' &&
+            !deleted &&
+            contentType === 'application/json'
+          return {
+            id: entry.id,
+            kind,
+            deleted,
+            updatedAt: '2026-07-30T00:00:00Z',
+            updatedAtCounter: 0,
+            originId: 'origin-1',
+            checkpoint: String(start + index + 1),
+            ...(kind === 'resource' && { contentType }),
+            ...(liveJson && entry.data !== undefined && { data: entry.data })
+          }
+        }),
+        checkpoint: page.length > 0 ? String(start + page.length) : null
       }
     }
   }
@@ -719,9 +784,11 @@ function fakeRemoteStore({
       return descriptor
     },
     encryptionReads: () => encryptionReads,
+    checkpointsRequested: () => checkpointsRequested,
     resourceGets: () => resourceGets
   } as unknown as WasRemoteStore & {
     encryptionReads: () => number
     resourceGets: () => number
+    checkpointsRequested: () => Array<string | undefined>
   }
 }
