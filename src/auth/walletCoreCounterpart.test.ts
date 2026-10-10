@@ -178,7 +178,7 @@ describe('the credential half, against wallet-core', () => {
       selectedVcs: [credential],
       challenge,
       domain: ORIGIN,
-      didAuthRequested: true,
+      sign: true,
       zcaps: [grant],
       appConnect: { firstRun: true }
     })
@@ -292,7 +292,7 @@ describe('the credential half, against wallet-core', () => {
       selectedVcs: [credential],
       challenge,
       domain: ORIGIN,
-      didAuthRequested: true,
+      sign: true,
       zcaps: [grant],
       appConnect: { firstRun: false }
     })

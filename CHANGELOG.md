@@ -1,16 +1,24 @@
 # @interop/was-react Changelog
 
-## 0.26.1 - TBD
+## 0.27.0 - TBD
 
 ### Changed
 
-- `SharedCollectionReader.list()` reads the widened `changes` feed. It keeps
-  `kind: 'resource'` entries only, skipping `collection-metadata`, `log`, and
-  unknown kinds, and still resumes from each page's checkpoint. A tombstone is
-  read from `deleted` (was `_deleted`). A binary or `text/jsonl` resource is
-  skipped and drops an earlier JSON body for its id. The filter is was-client's
-  re-exported `isResourceChange` / `isJsonResourceChange`. Needs
-  `@interop/was-client` 0.89.0.
+- `SharedCollectionReader.list()` reads the widened `changes` feed through
+  was-client's `Collection.documents()` walk instead of paging the feed itself.
+  Only `kind: 'resource'` entries with JSON content are kept; the Collection's
+  own records, unknown kinds, tombstones (`deleted`, was `_deleted`), and binary
+  or `text/jsonl` resources drop out, and the walk resumes from each page's
+  checkpoint.
+- Bump `@interop/was-sync` to 0.8.2. The replica schema carries the server's
+  write stamp (`updatedAtCounter`, `originId`, nested `meta`) in place of the
+  integer `version` / `metaVersion`, at the same schema version, so RxDB refuses
+  to reopen an existing replica. No migration or in-code forget is shipped:
+  every remembered browser clears its local data (`clearLocalData()` removes the
+  replica with its replication meta) and logs in again once, and local writes
+  not yet pushed are lost with the old replica. Also bump `@interop/was-client`
+  to 0.93.2, `@interop/wallet-core` to 0.104.1, and `@interop/wallet-request` to
+  0.5.1.
 - Docs: the party that asks a wallet for grants is the "requester" (an app,
   service, or agent), replacing "relying party" / "RP" in JSDoc, README, and
   ARCHITECTURE.md. Here the requester is the app running this library.

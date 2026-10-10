@@ -17,7 +17,6 @@
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  initRecipients,
   mintHmacKey,
   ownerRecipient,
   wrapEpochSecret
@@ -28,6 +27,7 @@ import { LocalStore } from '../../src/storage/localStore.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import type { WasCollectionConfig } from '../../src/config.js'
 import { encodeIndexSchemaMeta } from '../fixtures/indexSchemaMeta.js'
+import { mintRoster } from '../fixtures/roster.js'
 
 // A neutral test collection registry (not any app's real collections).
 const COLLECTIONS: WasCollectionConfig[] = [{ key: 'notes', id: 'notes' }]
@@ -110,29 +110,12 @@ function defaultDescriptor(
 
 /**
  * A one-epoch encryption descriptor whose sole recipient is the app's identity
- * KAK, minted with was-client's own `initRecipients` against an in-memory
- * collection stub (the same shape the offline descriptor cache holds).
+ * KAK, minted over the shared roster fixture (the same shape the offline
+ * descriptor cache holds).
  */
 async function mintDescriptor(): Promise<CollectionEncryption> {
   const { keyAgreementKey } = await identityKeys()
-  let description: Record<string, unknown> = {
-    name: COLLECTION,
-    encryption: { scheme: 'edv' }
-  }
-  const collection = {
-    async describeWithEtag() {
-      return { description: { ...description }, etag: 'etag-0' }
-    },
-    async replaceDescription(next: Record<string, unknown>) {
-      description = next
-    }
-  }
-  return initRecipients({
-    collection: collection as unknown as Parameters<
-      typeof initRecipients
-    >[0]['collection'],
-    recipients: [ownerRecipient({ keyAgreementKey })]
-  })
+  return mintRoster({ recipients: [ownerRecipient({ keyAgreementKey })] })
 }
 
 /**
@@ -695,10 +678,9 @@ describe('LocalStore public (plaintext) collections', () => {
       {
         id: 'resource-a',
         updatedAt: now,
-        version: 0,
         data: { id: 'some-other-id', title: 'mismatched' }
       },
-      { id: 'resource-b', updatedAt: now, version: 0, data: { title: 'no id' } }
+      { id: 'resource-b', updatedAt: now, data: { title: 'no id' } }
     ])
 
     expect(await store.listEntities<NoteDoc>(PUBLIC_COLLECTION)).toEqual([post])
@@ -727,7 +709,6 @@ describe('LocalStore public (plaintext) collections', () => {
     await store.rxCollection(PUBLIC_COLLECTION).insert({
       id: 'stray-envelope',
       updatedAt: new Date().toISOString(),
-      version: 0,
       data: { id: 'stray-envelope', sequence: 0, jwe: { protected: 'x' } }
     })
 

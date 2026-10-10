@@ -90,9 +90,8 @@ export interface DeclarationResult {
 }
 
 /**
- * One collection's Metadata object as read through its delegated capability:
- * was-client's own `describeWithEtag` shape, with `custom` exactly as stored
- * and the `metaVersion` validator (when the backend serves one) beside it.
+ * One collection's Metadata object as `readCollectionMeta` returns it:
+ * was-client's own `describeWithEtag` shape.
  */
 export type CollectionMetaRead = NonNullable<
   Awaited<ReturnType<Collection['describeWithEtag']>>
@@ -419,10 +418,10 @@ export class WasRemoteStore {
   /**
    * Reads one collection's Metadata object RAW, invoked with that collection's
    * delegated zcap: the `encryption` descriptor, the public `plaintext`
-   * declaration, and the `custom` envelope, as one object under one
-   * `metaVersion` validator (returned beside it as `etag` when the backend
-   * serves one). On an encrypted collection the returned `custom` is the
-   * opaque metadata envelope exactly as stored -- which is what the local
+   * declaration, and the `custom` envelope, as one object under one `ETag`
+   * validator (returned beside it as `etag` when the backend serves one). On
+   * an encrypted collection the returned `custom` is the opaque metadata
+   * envelope exactly as stored -- which is what the local
    * store's cipher wants, since it decodes the envelope itself (`applyMeta`)
    * to recover the persisted blinded-index schema. Deliberately NOT
    * `Collection.meta()`: that one DECODES `custom` to plaintext, which

@@ -7,13 +7,12 @@
  * key-agreement key (`deriveIdentity`) as the recipient -- exactly the key the
  * wallet registers as the app's roster entry -- so the round-trip proves the
  * shared-key contract, not a synthetic key. A descriptor is minted with
- * was-client's own `initRecipients` against a tiny in-memory collection stub.
+ * was-client's own `initRecipients` over the shared in-memory roster fixture.
  *
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
 import {
-  initRecipients,
   mintHmacKey,
   ownerRecipient,
   epochKeyIdFor,
@@ -29,6 +28,7 @@ import { deriveIdentity } from '../identity/agents.js'
 import { createDocCipher, createUnprovisionedDocCipher } from './docCipher.js'
 import type { Json } from '@interop/was-sync'
 import { encodeIndexSchemaMeta } from '../../test/fixtures/indexSchemaMeta.js'
+import { mintRoster } from '../../test/fixtures/roster.js'
 
 // A fixed 32-byte master seed drives the deterministic identity derivation.
 const SEED = new Uint8Array(32).map((_, index) => (index * 5 + 1) & 0xff)
@@ -36,30 +36,12 @@ const COLLECTION_ID = 'app-notes'
 
 /**
  * Mints a one-epoch encryption descriptor whose sole recipient is the given
- * key-agreement key, via was-client's `initRecipients` driven against an
- * in-memory collection whose description write is a no-op CAS.
+ * key-agreement key, over the shared roster fixture.
  */
 async function mintDescriptor(
   keyAgreementKey: Parameters<typeof ownerRecipient>[0]['keyAgreementKey']
 ) {
-  let description: Record<string, unknown> = {
-    name: 'app-notes',
-    encryption: { scheme: 'edv' }
-  }
-  const collection = {
-    async describeWithEtag() {
-      return { description: { ...description }, etag: 'etag-0' }
-    },
-    async replaceDescription(next: Record<string, unknown>) {
-      description = next
-    }
-  }
-  return initRecipients({
-    collection: collection as unknown as Parameters<
-      typeof initRecipients
-    >[0]['collection'],
-    recipients: [ownerRecipient({ keyAgreementKey })]
-  })
+  return mintRoster({ recipients: [ownerRecipient({ keyAgreementKey })] })
 }
 
 const DOC: Json = { id: 'note-1', title: 'hello', body: { n: 42 } }

@@ -20,20 +20,18 @@
 import { isIntegrityError } from '@interop/was-client/sync'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  initRecipients,
   ownerRecipient,
-  removeRecipient,
   x25519RecipientFromDidKey
 } from '@interop/was-client/edv'
-import { NotImplementedError } from '@interop/was-client'
 import type { CollectionEncryption } from '@interop/was-client'
+import { fakeRemoteStore } from '../fixtures/remoteStore.js'
+import { mintRoster, rotateRoster } from '../fixtures/roster.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import { createDocCipher } from '../../src/storage/docCipher.js'
 import {
   SharedCollectionReader,
   SharedCollectionUnavailableError
 } from '../../src/storage/sharedCollectionReader.js'
-import type { WasRemoteStore } from '../../src/storage/wasRemoteStore.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../../src/log.js'
 
@@ -41,64 +39,6 @@ const APP_SEED = new Uint8Array(32).map((_, index) => (index * 7 + 3) & 0xff)
 const OWNER_SEED = new Uint8Array(32).map((_, index) => (index * 5 + 11) & 0xff)
 const EXTRA_SEED = new Uint8Array(32).map((_, index) => (index * 3 + 19) & 0xff)
 const COLLECTION_ID = 'private-credentials'
-
-/**
- * An in-memory Collection stand-in for the recipient operations: they only ever
- * read the description with its ETag and write the mutated one back.
- */
-function descriptorCollection(
-  encryption: CollectionEncryption = { scheme: 'edv' } as CollectionEncryption
-): Parameters<typeof initRecipients>[0]['collection'] {
-  let description: Record<string, unknown> = {
-    name: COLLECTION_ID,
-    encryption
-  }
-  return {
-    async describeWithEtag() {
-      return { description: { ...description }, etag: 'etag-0' }
-    },
-    async replaceDescription(next: Record<string, unknown>) {
-      description = next
-    }
-  } as unknown as Parameters<typeof initRecipients>[0]['collection']
-}
-
-/**
- * Mints a one-epoch roster over an in-memory collection stand-in, with the
- * wallet owner as recipient zero and the given app recipient alongside it.
- */
-async function mintRoster({
-  recipients
-}: {
-  recipients: Parameters<typeof initRecipients>[0]['recipients']
-}): Promise<CollectionEncryption> {
-  return initRecipients({ collection: descriptorCollection(), recipients })
-}
-
-/**
- * Rotates a roster by removing one recipient, producing a descriptor with a SECOND
- * epoch wrapped to everyone who remains. The wallet does exactly this when a
- * share is withdrawn; here it is the cheapest way to obtain a genuine two-epoch
- * descriptor whose current epoch a stale reader has never seen.
- */
-async function rotateRoster({
-  descriptor,
-  removeKid
-}: {
-  descriptor: CollectionEncryption
-  removeKid: string
-}): Promise<CollectionEncryption> {
-  return removeRecipient({
-    collection: descriptorCollection(descriptor) as unknown as Parameters<
-      typeof removeRecipient
-    >[0]['collection'],
-    space: { async revoke() {} } as unknown as Parameters<
-      typeof removeRecipient
-    >[0]['space'],
-    recipientId: removeKid,
-    revoke: []
-  })
-}
 
 describe('the app-side recipient identity', () => {
   it('derives byte-identically on both sides of a share', async () => {
@@ -173,6 +113,7 @@ describe('SharedCollectionReader', () => {
     const { id, envelope } = await ownerCipher.encrypt({ data: payload })
 
     const remoteStore = fakeRemoteStore({
+      collectionId: COLLECTION_ID,
       encryption,
       resources: { [id]: envelope }
     })
@@ -212,6 +153,7 @@ describe('SharedCollectionReader', () => {
     // The envelope is sealed for its own id; the server serves it elsewhere.
     const reader = await SharedCollectionReader.open({
       remoteStore: fakeRemoteStore({
+        collectionId: COLLECTION_ID,
         encryption,
         resources: {
           'some-other-resource': envelope,
@@ -236,7 +178,10 @@ describe('SharedCollectionReader', () => {
     const app = await deriveIdentity({ seed: APP_SEED })
     await expect(
       SharedCollectionReader.open({
-        remoteStore: fakeRemoteStore({ resources: {} }),
+        remoteStore: fakeRemoteStore({
+          collectionId: COLLECTION_ID,
+          resources: {}
+        }),
         keyAgreementKey: app.keyAgreementKey,
         keyResolver: app.keyResolver,
         collectionId: COLLECTION_ID
@@ -252,7 +197,11 @@ describe('SharedCollectionReader', () => {
     })
     await expect(
       SharedCollectionReader.open({
-        remoteStore: fakeRemoteStore({ encryption, resources: {} }),
+        remoteStore: fakeRemoteStore({
+          collectionId: COLLECTION_ID,
+          encryption,
+          resources: {}
+        }),
         keyAgreementKey: app.keyAgreementKey,
         keyResolver: app.keyResolver,
         collectionId: COLLECTION_ID
@@ -272,6 +221,7 @@ describe('SharedCollectionReader', () => {
     })
     const reader = await SharedCollectionReader.open({
       remoteStore: fakeRemoteStore({
+        collectionId: COLLECTION_ID,
         encryption,
         resources: { plain: { hello: 'world' } }
       }),
@@ -293,6 +243,7 @@ describe('SharedCollectionReader.list', () => {
     expect(owner.controllerDid).not.toBe(app.controllerDid)
 
     const remoteStore = fakeRemoteStore({
+      collectionId: COLLECTION_ID,
       encryption,
       resources: {},
       // Three live documents plus a tombstone, walked two per page so the
@@ -332,6 +283,7 @@ describe('SharedCollectionReader.list', () => {
     const previous = setLogger(capture.logger)
     try {
       const remoteStore = fakeRemoteStore({
+        collectionId: COLLECTION_ID,
         encryption,
         resources: {},
         changes: [
@@ -382,6 +334,7 @@ describe('SharedCollectionReader.list', () => {
     const previous = setLogger(capture.logger)
     try {
       const remoteStore = fakeRemoteStore({
+        collectionId: COLLECTION_ID,
         encryption,
         resources: {
           [first.id]: first.envelope,
@@ -466,6 +419,7 @@ describe('SharedCollectionReader unknown-epoch refresh', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const remoteStore = fakeRemoteStore({
+        collectionId: COLLECTION_ID,
         // Open on the stale descriptor; every later read answers with the fresh one.
         descriptors: [stale, fresh],
         resources: {},
@@ -505,6 +459,7 @@ describe('SharedCollectionReader mid-session revoke', () => {
     const previous = setLogger(capture.logger)
     try {
       const remoteStore = fakeRemoteStore({
+        collectionId: COLLECTION_ID,
         // Opened on the roster this app is in; the refresh the unknown epoch
         // drives answers with no roster at all (access removed mid-session).
         descriptors: [stale, undefined],
@@ -549,6 +504,7 @@ describe('SharedCollectionReader mid-session revoke', () => {
     try {
       const reader = await SharedCollectionReader.open({
         remoteStore: fakeRemoteStore({
+          collectionId: COLLECTION_ID,
           descriptors: [stale, undefined],
           resources: { [unreadable.id]: unreadable.envelope }
         }),
@@ -653,142 +609,5 @@ async function sharedFixture(): Promise<{
     owner,
     encryption,
     encrypt: payload => ownerCipher.encrypt({ data: payload })
-  }
-}
-
-/**
- * One entry of the fake `changes` feed: a Resource (a live document with its
- * stored body, or a tombstone) by default, or another record `kind` named by
- * URL. A Resource is JSON unless `contentType` says otherwise, and its `data`
- * rides inline only while it is live JSON, as on the wire.
- */
-interface FakeChange {
-  id: string
-  kind?: string
-  contentType?: string
-  data?: unknown
-  deleted?: boolean
-}
-
-/**
- * A minimal `WasRemoteStore` stand-in: a fixed (or scripted) encryption descriptor
- * plus an in-memory resource map, served through the same
- * `was.space().collection()` handle chain the reader walks.
- *
- * `changes` drives the fast read path. Supply `changes` to script a feed (paged
- * at whatever `limit` the reader asks for) or `changesNotImplemented` to make
- * the backend answer as one without the `changes-query` feature, forcing the
- * `list()` + `get()` fallback. With neither, the feed mirrors `resources`.
- *
- * `descriptors` scripts successive `readCollectionEncryption` answers (the last one
- * repeats), so an unknown-epoch refresh can be observed; `encryptionReads`
- * counts them.
- */
-function fakeRemoteStore({
-  encryption,
-  descriptors,
-  resources,
-  changes,
-  changesNotImplemented = false
-}: {
-  encryption?: CollectionEncryption
-  descriptors?: Array<CollectionEncryption | undefined>
-  resources: Record<string, unknown>
-  changes?: FakeChange[]
-  changesNotImplemented?: boolean
-}): WasRemoteStore & {
-  encryptionReads: () => number
-  resourceGets: () => number
-  checkpointsRequested: () => Array<string | undefined>
-} {
-  const feed: FakeChange[] =
-    changes ?? Object.entries(resources).map(([id, data]) => ({ id, data }))
-  const scripted = descriptors ?? [encryption]
-  let encryptionReads = 0
-  let resourceGets = 0
-  const checkpointsRequested: Array<string | undefined> = []
-
-  const collection = {
-    async list() {
-      return {
-        items: Object.keys(resources).map(id => ({ id, url: `./${id}` }))
-      }
-    },
-    async get(resourceId: string) {
-      resourceGets++
-      return resources[resourceId] ?? null
-    },
-    async changes({
-      checkpoint,
-      limit
-    }: {
-      checkpoint?: string
-      limit?: number
-    }) {
-      if (changesNotImplemented) {
-        throw new NotImplementedError(
-          'This backend does not support the "changes-query" feature.'
-        )
-      }
-      checkpointsRequested.push(checkpoint)
-      // The fake checkpoint is a feed POSITION, not a resource id: the feed can
-      // carry the same id twice (a write and its later tombstone), so an
-      // id-keyed resume would be ambiguous.
-      const start = checkpoint ? Number(checkpoint) : 0
-      const size = limit ?? feed.length
-      const page = feed.slice(start, start + size)
-      return {
-        documents: page.map((entry, index) => {
-          const kind = entry.kind ?? 'resource'
-          const deleted = entry.deleted === true
-          const contentType = entry.contentType ?? 'application/json'
-          const liveJson =
-            kind === 'resource' &&
-            !deleted &&
-            contentType === 'application/json'
-          return {
-            id: entry.id,
-            kind,
-            deleted,
-            updatedAt: '2026-07-30T00:00:00Z',
-            updatedAtCounter: 0,
-            originId: 'origin-1',
-            checkpoint: String(start + index + 1),
-            ...(kind === 'resource' && { contentType }),
-            ...(liveJson && entry.data !== undefined && { data: entry.data })
-          }
-        }),
-        checkpoint: page.length > 0 ? String(start + page.length) : null
-      }
-    }
-  }
-
-  return {
-    spaceId: 'space-1',
-    was: {
-      space() {
-        return {
-          collection() {
-            return collection
-          }
-        }
-      }
-    },
-    collectionCapability() {
-      return { id: 'urn:zcap:delegated:1' }
-    },
-    async readCollectionEncryption() {
-      const descriptor =
-        scripted[Math.min(encryptionReads, scripted.length - 1)]
-      encryptionReads++
-      return descriptor
-    },
-    encryptionReads: () => encryptionReads,
-    checkpointsRequested: () => checkpointsRequested,
-    resourceGets: () => resourceGets
-  } as unknown as WasRemoteStore & {
-    encryptionReads: () => number
-    resourceGets: () => number
-    checkpointsRequested: () => Array<string | undefined>
   }
 }

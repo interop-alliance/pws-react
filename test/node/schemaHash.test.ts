@@ -4,9 +4,11 @@
 /**
  * The replica schema is stored state: RxDB hashes the declared schema and
  * refuses to open an existing collection whose stored hash differs at the same
- * `version`. The schema this library now declares comes from
- * `@interop/was-sync` and adds `createdBy`, so a replica created under the
- * previous shape cannot be reopened.
+ * `version`. The schema this library declares comes from `@interop/was-sync`,
+ * which since 0.8.0 carries the server's write stamp (`updatedAtCounter`,
+ * `originId`, the nested `meta`) in place of the integer `version` /
+ * `metaVersion`, so a replica created under the previous shape cannot be
+ * reopened.
  *
  * This test pins that refusal, and with it the CHANGELOG's note that every
  * remembered browser has to clear its local data and log in again once. It
@@ -23,10 +25,10 @@ import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 import { syncedDocSchema } from '@interop/was-sync'
 
 /**
- * The synced-doc schema exactly as this library declared it before the driver
- * moved to `@interop/was-sync`: no `createdBy` property. Inlined rather than
- * imported, since the module it came from is deleted; it exists here only to
- * create a replica under the old hash.
+ * The synced-doc schema as `@interop/was-sync` 0.7 declared it: the integer
+ * `version` / `metaVersion` revisions, with `version` required, and no write
+ * stamp. Inlined rather than imported, since no release still ships it; it
+ * exists here only to create a replica under the old hash.
  *
  * @returns {object}
  */
@@ -40,7 +42,10 @@ function previousSyncedDocSchema(): Record<string, unknown> {
       updatedAt: { type: 'string', maxLength: 64 },
       version: { type: 'number' },
       metaVersion: { type: 'number' },
+      createdBy: { type: 'string', maxLength: 256 },
       epoch: { type: 'string', maxLength: 256 },
+      etag: { type: 'string', maxLength: 256 },
+      metaEtag: { type: 'string', maxLength: 256 },
       data: { type: 'object', additionalProperties: true },
       custom: { type: 'object', additionalProperties: true }
     },

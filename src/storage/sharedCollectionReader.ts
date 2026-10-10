@@ -35,11 +35,7 @@
  *   roster), which are never re-encrypted and will not decrypt here. That is
  *   expected, not corruption -- they are skipped with a warning.
  */
-import {
-  isJsonResourceChange,
-  isResourceChange,
-  NotImplementedError
-} from '@interop/was-client'
+import { NotImplementedError } from '@interop/was-client'
 import type { Collection, CollectionEncryption } from '@interop/was-client'
 import type {
   IKeyAgreementKey,
@@ -69,14 +65,6 @@ import { log } from '../log.js'
  * size.
  */
 export const SHARED_CHANGES_PAGE_SIZE = 100
-
-/**
- * The `changes`-feed resume position, read off the handle's own signature so
- * this module needs no direct dependency on the storage-core types package.
- */
-type ChangesCheckpoint = NonNullable<
-  Awaited<ReturnType<Collection['changes']>>['checkpoint']
->
 
 /**
  * One decrypted resource of a shared collection: the WAS resource id (the
@@ -227,51 +215,27 @@ export class SharedCollectionReader {
   }
 
   /**
-   * The fast path: walk the `changes` feed page by page, resuming from each
-   * page's returned checkpoint, until a page comes back shorter than the
-   * requested limit (the feed's "you have caught up" signal). Only
-   * `kind: 'resource'` entries name a resource: the Collection's own records
-   * (`collection-metadata`, `log`) and a kind this reader does not know are
-   * skipped, and the next page still resumes from the page's own checkpoint.
-   * A tombstone (`deleted`) and a resource whose content is not JSON drop any
-   * body collected for the id, so the result is the LIVE set of JSON resources
-   * -- the same semantics the resource-listing path has. A resource that
-   * changes more than once within the walk appears under one id, so the last
-   * body seen wins.
+   * The fast path: was-client's `documents()` walk over the `changes` feed,
+   * which pages the feed to its end, keeps only live JSON Resources (the
+   * Collection's own records, tombstones, and binary or `text/jsonl` Resources
+   * drop out, a rewritten id keeps its last body), and returns each stored
+   * body undecrypted -- the LIVE set, the same semantics the resource-listing
+   * path has. A collection that is missing or not visible answers `null`,
+   * which lists as empty, like the slow path.
    */
   async #listViaChanges(collection: Collection): Promise<SharedResource[]> {
-    const bodies = new Map<string, Json>()
-    let checkpoint: ChangesCheckpoint | undefined
-    for (;;) {
-      const page = await collection.changes({
-        ...(checkpoint && { checkpoint }),
-        limit: this.#pageSize
-      })
-      for (const document of page.documents) {
-        if (!isResourceChange(document)) {
-          continue
-        }
-        // A tombstone, or a Resource whose content is not JSON (a binary or
-        // `text/jsonl` one carries no inline `data`), drops any body collected
-        // for the id. The handle refuses a live JSON entry with no `data`.
-        if (document.deleted || !isJsonResourceChange(document)) {
-          bodies.delete(document.id)
-          continue
-        }
-        bodies.set(document.id, document.data as Json)
-      }
-      if (page.documents.length < this.#pageSize || !page.checkpoint) {
-        break
-      }
-      checkpoint = page.checkpoint
-    }
+    const documents =
+      (await collection.documents({ limit: this.#pageSize })) ?? []
     // Decrypt the collected bodies concurrently: each is an independent unwrap
     // with no ordering dependency, so serializing the per-body WebCrypto work
     // would only add latency to the read.
     const decrypted = await Promise.all(
-      [...bodies].map(async ([id, body]) => {
-        const data = await this.#decryptForListing({ id, body })
-        return data === undefined ? null : { id, data }
+      documents.map(async ({ id, data }) => {
+        const payload = await this.#decryptForListing({
+          id,
+          body: data as Json
+        })
+        return payload === undefined ? null : { id, data: payload }
       })
     )
     return decrypted.filter(resource => resource !== null)

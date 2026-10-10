@@ -12,27 +12,12 @@
  * are the client's, and are tested there.
  */
 import { describe, it, expect } from 'vitest'
-import type { WasClient } from '@interop/was-client'
+import { rejectingClient } from '../../test/fixtures/rejectingClient.js'
 import { createWasSyncPort } from './wasSyncPort.js'
 import {
   WasSyncAuthError,
   WasSyncConflictError
 } from '@interop/was-client/sync'
-
-/**
- * A fake `WasClient` whose raw `request` and whose `changes` feed both reject
- * with an error carrying the given HTTP status, so a test can assert how the
- * port maps that status on either path.
- */
-function rejectingClient(status: number): WasClient {
-  const reject = async () => {
-    throw Object.assign(new Error(`HTTP ${status}`), { status })
-  }
-  return {
-    request: reject,
-    space: () => ({ collection: () => ({ changes: reject }) })
-  } as unknown as WasClient
-}
 
 function makePort(status: number) {
   return createWasSyncPort({

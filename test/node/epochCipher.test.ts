@@ -18,11 +18,12 @@
  */
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { initRecipients, ownerRecipient } from '@interop/was-client/edv'
+import { ownerRecipient } from '@interop/was-client/edv'
 import type { CollectionEncryption } from '@interop/was-client'
 import { LocalStore } from '../../src/storage/localStore.js'
 import type { Json } from '@interop/was-sync'
 import { createDocCipher } from '../../src/storage/docCipher.js'
+import { mintRoster } from '../fixtures/roster.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import type { WasCollectionConfig } from '../../src/config.js'
 
@@ -77,24 +78,7 @@ async function mintDescriptor(
   seed: Uint8Array = SEED
 ): Promise<CollectionEncryption> {
   const { keyAgreementKey } = await deriveIdentity({ seed })
-  let description: Record<string, unknown> = {
-    name: 'notes',
-    encryption: { scheme: 'edv' }
-  }
-  const collection = {
-    async describeWithEtag() {
-      return { description: { ...description }, etag: 'etag-0' }
-    },
-    async replaceDescription(next: Record<string, unknown>) {
-      description = next
-    }
-  }
-  return initRecipients({
-    collection: collection as unknown as Parameters<
-      typeof initRecipients
-    >[0]['collection'],
-    recipients: [ownerRecipient({ keyAgreementKey })]
-  })
+  return mintRoster({ recipients: [ownerRecipient({ keyAgreementKey })] })
 }
 
 afterEach(async () => {
@@ -125,7 +109,6 @@ describe('LocalStore epoch-descriptor refresh', () => {
     await store.rxCollection(COLLECTION_KEY).insert({
       id,
       updatedAt: new Date().toISOString(),
-      version: 0,
       data: envelope as unknown as Json
     })
 
@@ -168,7 +151,6 @@ describe('LocalStore epoch-descriptor refresh', () => {
       await store.rxCollection(COLLECTION_KEY).insert({
         id,
         updatedAt: new Date().toISOString(),
-        version: 0,
         data: envelope as unknown as Json
       })
     }
@@ -205,7 +187,6 @@ describe('LocalStore epoch-descriptor refresh', () => {
     await store.rxCollection(COLLECTION_KEY).insert({
       id,
       updatedAt: new Date().toISOString(),
-      version: 0,
       data: envelope as unknown as Json
     })
     // The refresh answers with the app's OWN roster, which does not carry the

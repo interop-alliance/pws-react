@@ -156,9 +156,10 @@ export class SyncController {
         serverUrl: remoteStore.serverUrl,
         collections: covered,
         rxCollection: key => localStore.rxCollection(key),
-        // The 412 conflict re-read resolves `version` from the changes-feed
-        // body: CORS hides the `GET` ETag cross-origin, which is this
-        // library's deployment shape.
+        // The 412 conflict re-read resolves the primary state (the server's
+        // write stamp and validators) from the changes-feed body: CORS hides
+        // the `GET` ETag cross-origin, which is this library's deployment
+        // shape.
         feedPrimaryRead: true,
         // A `401` / `403` / the server's masked `404` must arrive typed, or
         // `onAuthError` could never fire.

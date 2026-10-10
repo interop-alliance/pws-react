@@ -39,17 +39,17 @@ import * as vc from '@interop/vc'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import { CapabilityAgent } from '@interop/capability-agent'
 import {
-  initRecipients,
   ownerRecipient,
-  removeRecipient,
   x25519RecipientFromDidKey
 } from '@interop/was-client/edv'
-import type { CollectionEncryption, WasClient } from '@interop/was-client'
 import type {
   IVerifiableCredential,
   IVerifiablePresentation,
   IZcap
 } from '@interop/data-integrity-core'
+import { fakeRemoteStore } from '../fixtures/remoteStore.js'
+import { rejectingClient } from '../fixtures/rejectingClient.js'
+import { mintRoster, rotateRoster } from '../fixtures/roster.js'
 import { checkGrants, grantsOf } from '../../src/auth/verifyResponse.js'
 import { RW_ACTIONS } from '../../src/auth/loginRequest.js'
 import { parseGrants, parseInvocationTarget } from '../../src/grants.js'
@@ -80,7 +80,6 @@ import {
 } from '../../src/storage/docCipher.js'
 import { createWasSyncPort } from '../../src/storage/wasSyncPort.js'
 import { SharedCollectionReader } from '../../src/storage/sharedCollectionReader.js'
-import type { WasRemoteStore } from '../../src/storage/wasRemoteStore.js'
 import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
 import { chapiGet } from '../../src/auth/chapi.js'
 import { loginWithWallet } from '../../src/auth/loginFlow.js'
@@ -858,6 +857,8 @@ describe('an epoch this app cannot open', () => {
         // Opened on the roster this app is in; the refresh the unknown epoch
         // drives answers with no roster at all, so the retry fails too.
         remoteStore: fakeRemoteStore({
+          collectionId: SHARED_COLLECTION_ID,
+          spaceId: SPACE_ID,
           descriptors: [opened, undefined],
           resources: {
             [readable.id]: readable.envelope,
@@ -961,169 +962,3 @@ describe('an epoch this app cannot open', () => {
     ).rejects.toSatisfy(isUnknownEpochError)
   })
 })
-
-/**
- * A `WasClient` whose raw `request` and `changes` feed both reject with an
- * error carrying the given HTTP status -- the wire failure a collected annex
- * generation produces on a grant that has not expired.
- *
- * @param status {number}
- * @returns {WasClient}
- */
-function rejectingClient(status: number): WasClient {
-  const reject = async (): Promise<never> => {
-    throw Object.assign(new Error(`HTTP ${status}`), { status })
-  }
-  return {
-    request: reject,
-    space: () => ({ collection: () => ({ changes: reject }) })
-  } as unknown as WasClient
-}
-
-/**
- * An in-memory Collection stand-in for the recipient operations: they only ever
- * read the description with its ETag and write the mutated one back.
- *
- * @param [encryption] {CollectionEncryption}
- * @returns {object}
- */
-function descriptorCollection(
-  encryption: CollectionEncryption = { scheme: 'edv' } as CollectionEncryption
-): Parameters<typeof initRecipients>[0]['collection'] {
-  let description: Record<string, unknown> = {
-    name: SHARED_COLLECTION_ID,
-    encryption
-  }
-  return {
-    async describeWithEtag() {
-      return { description: { ...description }, etag: 'etag-0' }
-    },
-    async replaceDescription(next: Record<string, unknown>) {
-      description = next
-    }
-  } as unknown as Parameters<typeof initRecipients>[0]['collection']
-}
-
-/**
- * Mints a one-epoch roster over that stand-in.
- *
- * @param options {object}
- * @param options.recipients {object[]}
- * @returns {Promise<CollectionEncryption>}
- */
-async function mintRoster({
-  recipients
-}: {
-  recipients: Parameters<typeof initRecipients>[0]['recipients']
-}): Promise<CollectionEncryption> {
-  return initRecipients({ collection: descriptorCollection(), recipients })
-}
-
-/**
- * Rotates a roster by removing one recipient, producing a descriptor with a
- * SECOND epoch wrapped to everyone who remains -- the cheapest way to obtain a
- * genuine epoch a stale reader has no key for.
- *
- * @param options {object}
- * @param options.descriptor {CollectionEncryption}
- * @param options.removeKid {string}
- * @returns {Promise<CollectionEncryption>}
- */
-async function rotateRoster({
-  descriptor,
-  removeKid
-}: {
-  descriptor: CollectionEncryption
-  removeKid: string
-}): Promise<CollectionEncryption> {
-  return removeRecipient({
-    collection: descriptorCollection(descriptor) as unknown as Parameters<
-      typeof removeRecipient
-    >[0]['collection'],
-    space: { async revoke() {} } as unknown as Parameters<
-      typeof removeRecipient
-    >[0]['space'],
-    recipientId: removeKid,
-    revoke: []
-  })
-}
-
-/**
- * A minimal `WasRemoteStore` stand-in: scripted encryption descriptors (the
- * last repeats) plus an in-memory resource map, served through the same
- * `was.space().collection()` handle chain the reader walks. The `changes` feed
- * mirrors the resource map.
- *
- * @param options {object}
- * @param options.descriptors {Array<CollectionEncryption | undefined>}
- * @param options.resources {object}
- * @returns {WasRemoteStore}
- */
-function fakeRemoteStore({
-  descriptors,
-  resources
-}: {
-  descriptors: Array<CollectionEncryption | undefined>
-  resources: Record<string, unknown>
-}): WasRemoteStore {
-  const feed = Object.entries(resources).map(([id, data]) => ({ id, data }))
-  let reads = 0
-
-  const collection = {
-    async list() {
-      return {
-        items: Object.keys(resources).map(id => ({ id, url: `./${id}` }))
-      }
-    },
-    async get(resourceId: string) {
-      return resources[resourceId] ?? null
-    },
-    async changes({
-      checkpoint,
-      limit
-    }: {
-      checkpoint?: { id: string; updatedAt: string }
-      limit?: number
-    }) {
-      const start = checkpoint ? Number(checkpoint.id) : 0
-      const page = feed.slice(start, start + (limit ?? feed.length))
-      return {
-        documents: page.map(entry => ({
-          id: entry.id,
-          _deleted: false,
-          updatedAt: '2026-08-26T00:00:00Z',
-          version: 1,
-          data: entry.data
-        })),
-        checkpoint:
-          page.length > 0
-            ? {
-                id: String(start + page.length),
-                updatedAt: '2026-08-26T00:00:00Z'
-              }
-            : null
-      }
-    }
-  }
-
-  return {
-    spaceId: SPACE_ID,
-    was: {
-      space() {
-        return {
-          collection() {
-            return collection
-          }
-        }
-      }
-    },
-    collectionCapability() {
-      return { id: 'urn:zcap:delegated:1' }
-    },
-    async readCollectionEncryption() {
-      const descriptor = descriptors[Math.min(reads, descriptors.length - 1)]
-      reads++
-      return descriptor
-    }
-  } as unknown as WasRemoteStore
-}

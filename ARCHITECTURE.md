@@ -490,19 +490,20 @@ Three kinds, and the distinctions are load-bearing:
   `SharedCollectionReader`, which fetches the stored EDV envelope raw (the
   `encryption: 'plaintext'` handle override) and decrypts it locally.
 
-`SharedCollectionReader.list()` has two paths. The fast one pages the `changes`
-feed -- whole pages of documents with their bodies, undecrypted by the server,
-which is exactly what a reader holding its own keys wants, and the same
-primitive replication pulls with. It costs one request per page rather than one
-per resource. The feed carries every record kind of a Collection, so the walk
-keeps `kind: 'resource'` entries only and skips the Collection's own records
-(`collection-metadata`, `log`) and any kind it does not know, while still
-resuming from each page's checkpoint. It also skips tombstones (`deleted`) and
-resources with no inline `data` (binary or `text/jsonl`), so the result is the
-live set of JSON resources. The fallback, for a backend without the
-`changes-query` feature (501, surfaced as `NotImplementedError`), lists the
-resource summaries and fetches each body; it warns once per reader that the
-collection is being read the slow way.
+`SharedCollectionReader.list()` has two paths. The fast one is was-client's
+`Collection.documents()` walk over the `changes` feed -- whole pages of
+documents with their bodies, undecrypted by the server, which is exactly what a
+reader holding its own keys wants, and the same primitive replication pulls
+with. It costs one request per page rather than one per resource. The feed
+carries every record kind of a Collection; the walk keeps live JSON
+`kind: 'resource'` entries only, skipping the Collection's own records
+(`collection-metadata`, `log`), any kind it does not know, tombstones
+(`deleted`), and resources with no inline `data` (binary or `text/jsonl`), so
+the result is the live set of JSON resources. The reader only decrypts what the
+walk returns. The fallback, for a backend without the `changes-query` feature
+(501, surfaced as `NotImplementedError`), lists the resource summaries and
+fetches each body; it warns once per reader that the collection is being read
+the slow way.
 
 `validateSharedCollections` rejects a collection declared in both registries: a
 collection cannot be app-owned and shared read-only at once.
@@ -595,6 +596,15 @@ does not cover is flagged `error` and kept out of the port entirely, so an
 uncovered collection never draws a fail-closed 403 that reads as expired access.
 `stop()` is terminal for a core instance, so the binding builds a fresh core
 inside `start()` and resets the status store on stop.
+
+Every replica collection is declared on `@interop/was-sync`'s
+`syncedDocSchema()`: a row is `{ id, updatedAt, data }` plus the optional
+members the server stamps on it (`updatedAtCounter`, `originId`, the nested
+`meta` stamp, `createdBy`, `epoch`, the `etag` / `metaEtag` validators, and
+`custom`). The schema is stored state. RxDB refuses to open a collection whose
+stored schema hash differs from the declared one, and the schema ships with no
+migration strategy, so a replica created under an earlier shape is not migrated:
+`clearLocalData()` removes it and the next login re-pulls from the server.
 
 Each collection's RxDB conflict handler (installed at `addCollections` in
 `LocalStore.init`) settles a 412 push conflict by decrypting both sides and

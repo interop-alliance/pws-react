@@ -5,7 +5,7 @@
  * LocalStore: the always-on local replica. A GENERIC per-entity envelope store
  * over an app's registered collections. Owns one RxDB (Dexie/IndexedDB)
  * database holding one collection per entity on the shared `syncedDocSchema()`;
- * every at-rest row is `{ id, updatedAt, version, data }`. On a PRIVATE
+ * every at-rest row is `{ id, updatedAt, data }`. On a PRIVATE
  * (default) collection `data` is the EDV envelope `{ id, sequence, jwe }` --
  * the server never sees plaintext. On a PUBLIC collection `data` is the
  * plaintext payload as-is, behind the same {@link DocCipher} seam (a
@@ -717,7 +717,6 @@ export class LocalStore {
     await this.#collection(key).insert({
       id: envelopeId,
       updatedAt: new Date().toISOString(),
-      version: 0,
       data: envelope,
       // The epoch the envelope was sealed under rides the content push as the
       // `Key-Epoch` header (absent on the plaintext codec).
