@@ -17,13 +17,17 @@
  * @vitest-environment node
  */
 import 'fake-indexeddb/auto'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ownerRecipient } from '@interop/was-client/edv'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  ownerRecipient,
+  UnverifiedDescriptorError
+} from '@interop/was-client/edv'
 import type { CollectionEncryption } from '@interop/was-client'
 import { LocalStore } from '../../src/storage/localStore.js'
 import type { Json } from '@interop/was-sync'
 import { createDocCipher } from '../../src/storage/docCipher.js'
 import { mintRoster } from '../fixtures/roster.js'
+import { fakeDescriptorSource } from '../fixtures/descriptorSource.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import type { WasCollectionConfig } from '../../src/config.js'
 
@@ -55,19 +59,16 @@ async function openStore(
 }
 
 /**
- * A descriptor source over a scripted answer, shaped exactly like the one the
- * sync bootstrap installs (`remoteDescriptorSource`), with a spy on the single
- * `collectionEncryption` read so refreshes can be counted.
+ * A descriptor source over one scripted answer.
  */
-function descriptorSource(encryption?: CollectionEncryption) {
-  return {
-    collectionEncryption: vi.fn(
-      async ({ collectionId }: { collectionId: string }) => {
-        void collectionId
-        return encryption
-      }
-    )
-  }
+function descriptorSource(
+  encryption?: CollectionEncryption,
+  { plain = false }: { plain?: boolean } = {}
+) {
+  return fakeDescriptorSource({
+    plain,
+    collectionEncryption: async () => encryption
+  })
 }
 
 /**
@@ -198,6 +199,44 @@ describe('LocalStore epoch-descriptor refresh', () => {
     expect(source.collectionEncryption).toHaveBeenCalledTimes(1)
     await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow()
     expect(source.collectionEncryption).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a source that does not verify the governing log', async () => {
+    // The same unknown epoch as above, but the installed source is a plain
+    // one (a Metadata read a host could have stripped the history from). The
+    // refresh is refused before the source is asked, as itself, and the
+    // cipher is not rebuilt from anything.
+    const encryption = await mintDescriptor()
+    const { keyAgreementKey, keyResolver } = await deriveIdentity({
+      seed: SEED
+    })
+    const descriptorCipher = await createDocCipher({
+      keyAgreementKey,
+      keyResolver,
+      collectionId: COLLECTION_ID,
+      encryption
+    })
+    const { id, envelope } = await descriptorCipher.encrypt({
+      data: { id: 'note-1', title: 'from another device' }
+    })
+    const store = await openStore()
+    await store.rxCollection(COLLECTION_KEY).insert({
+      id,
+      updatedAt: new Date().toISOString(),
+      data: envelope as unknown as Json
+    })
+    const source = descriptorSource(encryption, { plain: true })
+    store.setDescriptorSource(source)
+
+    await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow(
+      UnverifiedDescriptorError
+    )
+    // The refusal is for the session: a later read surfaces it again,
+    // without the refresh being re-armed.
+    await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow(
+      UnverifiedDescriptorError
+    )
+    expect(source.collectionEncryption).not.toHaveBeenCalled()
   })
 
   it('opens epoch-aware from a cached descriptor (no refresh needed)', async () => {

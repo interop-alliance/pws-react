@@ -82,6 +82,7 @@ import { StorageContext } from '../storage/storageContext.js'
 import { getWriterId } from '../storage/writerId.js'
 import { mergeAdopted } from '../storage/adopt.js'
 import { startWasSync } from '../storage/wasSync.js'
+import { createSpaceTrust, type SpaceTrust } from '../storage/spaceTrust.js'
 import { errorMessage } from '@interop/was-client/sync'
 import { SyncController } from '../storage/syncController.js'
 import { log } from '../log.js'
@@ -439,11 +440,13 @@ export function createAuthStore({
   async function beginSync({
     parsed,
     identity,
-    knownDescriptors
+    knownDescriptors,
+    trust
   }: {
     parsed: ParsedGrants
     identity: IdentityAgents
     knownDescriptors?: Record<string, CollectionEncryption>
+    trust?: SpaceTrust
   }): Promise<void> {
     const { controllerDid, zcapClient, keyAgreementKey, keyResolver } = identity
     controller = new SyncController({
@@ -470,7 +473,8 @@ export function createAuthStore({
           .catch(err =>
             log.warn('Failed to cache encryption descriptors', { err })
           ),
-      ...(knownDescriptors && { knownDescriptors })
+      ...(knownDescriptors && { knownDescriptors }),
+      ...(trust && { trust })
     })
     storageContext.attachRemoteStore(remoteStore)
     store.setState({ sharedCollections })
@@ -490,6 +494,8 @@ export function createAuthStore({
    * @param [options.knownDescriptors] {Record<string, CollectionEncryption>}
    *   encryption descriptors already read live during this bring-up, for the
    *   sync bootstrap to reuse instead of re-reading
+   * @param [options.trust] {SpaceTrust}   this activation's Space trust
+   *   state, shared with the login-time descriptor read
    * @returns {Promise<void>}
    */
   async function persistAndStartSync({
@@ -498,7 +504,8 @@ export function createAuthStore({
     parsed,
     grants,
     expires,
-    knownDescriptors
+    knownDescriptors,
+    trust
   }: {
     seed: Uint8Array
     identity: IdentityAgents
@@ -506,6 +513,7 @@ export function createAuthStore({
     grants: IZcap[]
     expires: string
     knownDescriptors?: Record<string, CollectionEncryption>
+    trust?: SpaceTrust
   }): Promise<void> {
     await persistAppSession({
       session: {
@@ -522,7 +530,8 @@ export function createAuthStore({
     pendingSync = beginSync({
       parsed,
       identity,
-      ...(knownDescriptors && { knownDescriptors })
+      ...(knownDescriptors && { knownDescriptors }),
+      ...(trust && { trust })
     })
     // A failed bootstrap must not resolve silently: surface it on the session
     // `error` (the sync rollup shows the per-collection error statuses the
@@ -704,6 +713,11 @@ export function createAuthStore({
     adopt?: AdoptSource
     restore?: boolean
   }): Promise<void> {
+    // One Space trust state for the whole activation: the login-time
+    // descriptor read and the sync bootstrap build separate remote stores,
+    // and the second must verify against the owner the first resolved and
+    // continue the heads the first pinned.
+    const trust = createSpaceTrust(session.parsed)
     try {
       // Load the cached encryption descriptors so the connected replica opens
       // epoch-aware: an offline hot restore then decrypts multi-recipient
@@ -719,7 +733,8 @@ export function createAuthStore({
           }),
           identity: session.identity,
           parsed: session.parsed,
-          onReadFailure: session.restore ? 'skip' : 'reject'
+          onReadFailure: session.restore ? 'skip' : 'reject',
+          trust
         })
       await openAndHydrate({
         identity: session.identity,
@@ -732,7 +747,8 @@ export function createAuthStore({
         parsed: session.parsed,
         grants: session.grants,
         expires: session.expires,
-        knownDescriptors: fresh
+        knownDescriptors: fresh,
+        trust
       })
     } catch (err) {
       await deactivateStore()

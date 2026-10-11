@@ -22,7 +22,9 @@ agent-facing rules (toolchain, tests, repo-specific dos and don'ts) see
   32-byte seed rule and yields the identity key-agreement key every encrypted
   collection is read with), the app-key credential (issue/locate/parse), seed
   and descriptor persistence (`createSeedStore`, `createDescriptorCache`), the
-  persisted app-session record, and the JSON-LD document loader.
+  persisted app-session record, the Space owner resolution (`resolveSpaceOwner`,
+  the did:webvh a Space's published account log resolves to), and the JSON-LD
+  document loader.
 - `src/auth/` -- the requester side of Login With Wallet (App Connect): CHAPI
   wrappers, VPR construction, response verification, and the login/reconnect
   orchestration. The requester (an app, service, or agent) is the party that
@@ -34,7 +36,8 @@ agent-facing rules (toolchain, tests, repo-specific dos and don'ts) see
   per-install `writerId` binding (`writerId.ts`), generic entity stores, the
   delegated remote store, the read-only `SharedCollectionReader`, the
   replication bootstrap (`wasSync.ts`), the session's encryption-descriptor
-  policy (`descriptorManager.ts`), the per-collection document cipher
+  policy (`descriptorManager.ts`), the governed descriptor acquisition
+  (`governedDescriptors.ts`), the per-collection document cipher
   (`docCipher.ts`) and the WAS sync port over it (`wasSyncPort.ts`), the sync
   controller binding, sync status, the local-to-connected adoption merge
   (`adopt.ts`), and the public share-URL helper (`publicUrl.ts`).
@@ -456,15 +459,21 @@ because an empty `allowedAction` array means every action in the zcap model.
 
 The seed never transits a server: minting happens in the wallet, delivery is the
 browser-direct CHAPI channel. Dev mode bypasses the credential entirely rather
-than faking one -- `provisionDevGrants` (Node only) derives a throwaway
-provisioner identity standing in for the wallet, creates the Space and the
-requested collections the way a wallet provisions them (a private collection
-declared `edv` with its epoch zero installed to the app's identity key-agreement
-key; a public one left plaintext), and delegates per-collection zcaps to the
-app's controller DID, which `connectWithGrants({ seed, grants })` then adopts
-directly. `issueSeedCredential` stays exported for app-side or test
-self-issuance; it signs the wallet's own credential shape by delegating to
-wallet-request's issuer rather than maintaining a copy of it.
+than faking one -- `provisionDevGrants` (Node only) builds what a wallet's
+account genesis builds, in the same order: a Space created under a throwaway
+provisioner client key, that key's did:webvh account log published at the
+Space's world-readable `id/did.jsonl`, every private collection's epoch zero (to
+the app's identity key-agreement key) installed as the genesis of the
+collection's `meta/log` through the log-governed descriptor store, the Space
+controller promoted to the did:webvh through wallet-core's own promotion stage
+(`ensurePromotedSpaceController`, under the configured Space name, so an
+interrupted promotion heals on a re-run), and per-collection zcaps delegated
+from the Space root under that DID to the app's controller DID, which
+`connectWithGrants({ seed, grants })` then adopts directly. A public collection
+is left plaintext. The dev Space therefore passes the same governed-read policy
+a wallet's does (see "Storage and sync"). `issueSeedCredential` stays exported
+for app-side or test self-issuance; it signs the wallet's own credential shape
+by delegating to wallet-request's issuer rather than maintaining a copy of it.
 
 ## The three kinds of collection
 
@@ -717,43 +726,41 @@ the parsed grant set and the invoking `ZcapClient` it builds the delegated
 `plaintext.indexes` declaration, and its encrypted `custom` envelope (where a
 private collection's blinded-index schema lives) are three members of one
 Collection Metadata object, served at `/space/{s}/{c}/meta` under one
-`metaVersion` validator. The bootstrap reads that object once per registered
-collection the grants cover, public collections included (a public collection
-that declares no indexes wants nothing from its object and is not read). That
-one read feeds the cipher rebuild, the encryption declaration, and the public
-indexes declaration. The blinded-index declaration and its schema install read
-the object again on their own (see below).
+`metaVersion` validator. The `encryption` member is only a projection of the
+collection's governing log, and is never read for the descriptor (see "The
+governed descriptor source" below). The bootstrap reads the object once per
+registered collection the grants cover where something on it is wanted: a public
+collection declaring indexes (the `plaintext` declaration's baseline), a private
+one whose descriptor was not already known (the `custom` envelope its
+blinded-index install reuses). That one read feeds the public indexes
+declaration and the install; the blinded-index declaration reads the object
+again on its own (see below).
 
-The private collection's cipher is rebuilt from the descriptor read off that
-object, when its epoch roster differs from what the local store opened with, and
-the fresh set is handed to the descriptor-cache refresher so an offline session
-can rebuild its epoch-aware ciphers without a live read. The encryption
-declaration writes `{ scheme: 'edv' }` onto a private collection that carries no
-descriptor yet, through was-client's `configure`, which merges the change over
-the object already read, pins the write to that object's validator, and retries
-a lost race on its own. It is skipped, and reported ok, on a public collection
-(public implies plaintext) and on one that already carries a descriptor -- the
-wallet's own epoch roster, which a bare descriptor must never overwrite. With no
-readable object there is nothing to merge into, so the write is skipped and
-reported failed rather than sent as a body that would replace the whole object.
+The private collection's cipher is rebuilt from the descriptor acquired through
+the governed source, when its epoch roster differs from what the local store
+opened with, and the fresh set is handed to the descriptor-cache refresher so an
+offline session can rebuild its epoch-aware ciphers without a live read. Nothing
+declares a collection encrypted from this side: the governing log's genesis is
+what declares it, written by whoever provisions the collection, and a private
+collection with no governing log stays fail-closed.
 
 Every collection that configures equality `indexes` then declares them, and
 where the declaration lives still depends on visibility. A public collection's
 declaration goes on the same object's plaintext `plaintext.indexes` member,
-through the same `Collection.configure` path as the encryption declaration. It
-merges the change over the object already read, carries `name`, `custom`, and
-every member this client does not model forward, and pins the write to the
-read's validator. A lost race is re-read and rebased by was-client's own
-compare-and-swap; only a race lost repeatedly is reported here, and the next
-session's pass repairs it. The declaration is skipped once the stored
-declaration already matches the configured list. A private collection declares
-its indexes as blinded-index attributes inside the object's encrypted `custom`
-envelope instead, through a compare-and-swap write (`declareBlindedIndexes`,
-over was-client's `Collection.declareIndexes`, one write for every missing
-attribute). The encrypted form is what lets every recipient discover what is
-queryable while the server never learns the attribute names. Only attributes
-missing from the persisted schema are written, so a returning session writes
-nothing, and the declaration reports whether it actually wrote.
+through was-client's `Collection.configure`. It merges the change over the
+object already read, carries `name`, `custom`, and every member this client does
+not model forward, and pins the write to the read's validator. A lost race is
+re-read and rebased by was-client's own compare-and-swap; only a race lost
+repeatedly is reported here, and the next session's pass repairs it. The
+declaration is skipped once the stored declaration already matches the
+configured list. A private collection declares its indexes as blinded-index
+attributes inside the object's encrypted `custom` envelope instead, through a
+compare-and-swap write (`declareBlindedIndexes`, over was-client's
+`Collection.declareIndexes`, one write for every missing attribute). The
+encrypted form is what lets every recipient discover what is queryable while the
+server never learns the attribute names. Only attributes missing from the
+persisted schema are written, so a returning session writes nothing, and the
+declaration reports whether it actually wrote.
 
 The persisted blinded-index schema is then installed on that collection's own
 document cipher (`LocalStore.applyCollectionMeta`, over the upstream cipher's
@@ -777,12 +784,8 @@ two non-answers apart as the Metadata read described below: not-found and a
 backend without metadata support mean "no schema", while any other failure is
 thrown, which the bootstrap warns about and skips the install for that session.
 
-The encryption declaration and the blinded-index declaration contend on the
-object's single validator. Only one of them ever fires on a given collection in
-a given pass: the encryption declaration applies only to a collection carrying
-no descriptor at all, and such a collection carries no blinding key either, so
-the blinded-index declaration never follows it there. The blinded-index
-declaration reads the object fresh for its own compare-and-swap rather than
+The blinded-index declaration is the one write a private collection takes in a
+pass, and it reads the object fresh for its own compare-and-swap rather than
 trusting the copy the pass read, so it is never caught out by a write that
 landed first.
 
@@ -792,7 +795,7 @@ blinded-index verbs need; replication itself still moves envelopes verbatim and
 never goes through that codec. A private collection whose descriptor carries no
 key epochs stays fail-closed, warned about plainly rather than surfacing later
 as per-row decrypt failures. The fetched descriptors are handed to
-`onDescriptorsFetched` (the offline descriptor cache) and a live descriptor
+`onDescriptorsFetched` (the offline descriptor cache) and the store's descriptor
 source is installed on the local store, so a decrypt that meets an unseen epoch
 (a rotation elsewhere) re-reads and rebuilds once per collection per session. An
 unseen epoch is the only signal that spends that refresh; a decrypt that fails
@@ -803,7 +806,62 @@ declaration write, and instead one `SharedCollectionReader` is opened per
 configured shared collection the grants cover, concurrently, each failure a
 warn-and-skip.
 
-`readRemoteDescriptors` is the login-time counterpart. It reads one encryption
+### The governed descriptor source
+
+Every `edv` descriptor this library adopts comes from one source,
+`WasRemoteStore.descriptorSource`: wallet-core's `logGovernedDescriptorSource`
+over each collection's `meta/log`, invoked with that collection's own delegated
+zcap (the grant that reads the collection covers its log, so no second grant is
+needed). A read resolves the log's verified head, with the chain, the entry
+proofs, and the external authorization checked against the Space owner's
+verified did:webvh account log. The served Metadata object's `encryption` member
+is never read for the descriptor. It is a projection a host could strip the
+governing `history` from, serving an epoch it minted in its place, and a plain
+reader cannot tell that from an honest point-state descriptor.
+
+The owner's controller view is resolved by `resolveSpaceOwner`
+(`src/identity/spaceOwner.ts`), once per connected activation. A requester holds
+nothing that names the Space owner: the grant chain's root is an opaque URN, and
+the Space Description needs a Space-scoped capability App Connect never
+delegates. What it can reach is the account log the owner publishes
+world-readable at `/space/{spaceId}/id/did.jsonl`. That log is self-certifying.
+The DID it resolves to encodes the host and path it is published under, so the
+owner of a Space is the DID whose log is published in that Space and whose
+identifier (`getFileUrl`) maps back to that URL. A log published for another
+location and served there fails that check; a tampered log fails resolution. The
+fetch, the resolution, and the location check are wallet-core's
+`discoverAccountLog`, the reader its own ceremonies verify an account log with
+(`verifyAccountLog` is that reader plus the expected-DID check), so was-react
+carries no copy of the body; `resolveSpaceOwner` only names the absent-log case
+after the Space asked about. The resolved `{ did, log }` becomes the
+`webvhResourceLogController` every collection-log read is verified against.
+
+Acquisition is written once, as `acquireGovernedDescriptor`
+(`src/storage/governedDescriptors.ts`): was-client's `acquireDescriptor` under
+`requireGoverned`, which admits only a source declaring `verifiesHistory: true`
+and refuses any other with `UnverifiedDescriptorError` before asking it. The
+login-time read, the bootstrap's install, the local store's unknown-epoch
+refresh, and the shared reader's self-refreshing cipher
+(`createRefreshingEdvDocCipher` with the same flag) all go through it, so
+nothing plain-read ever enters the descriptor cache. A fetch failure that
+`acquireDescriptor` would swallow (it falls back to the cache, which is empty
+here) is rethrown, so "unknown" stays apart from "no descriptor". A collection
+with no governing log answers no descriptor and stays fail-closed.
+`UnverifiedDescriptorError` surfaces as itself everywhere, since its message
+names the fix: the shared reader rethrows it ahead of
+`SharedCollectionUnavailableError`, and the local store records the refusal its
+refresh met and throws it from the decrypt that spent the refresh and every
+later one, rather than the envelope's unknown-epoch error. The owner's
+controller view and the chain-head pins live together on one `SpaceTrust`
+(`src/storage/spaceTrust.ts`), created by the auth store per connected
+activation and handed to both the login-time read's store and the bootstrap's
+store (`fromGrants` takes it as `trust`), so the owner's log is fetched and
+verified once and a head served to the second store continues what the first
+pinned. The pins are in memory: continuity is checked within a session, and a
+reload trusts the served head afresh. The owner resolution is kept only when it
+succeeds; a failed fetch is retried by the next read rather than remembered.
+
+`readRemoteDescriptors` is the login-time counterpart. It acquires one
 descriptor per granted private collection before any replication exists, because
 the connected replica must open epoch-aware. Epoch-from-birth leaves no
 single-key fallback, and the adoption merge writes into the replica before sync
@@ -811,38 +869,39 @@ starts. Public collections are excluded here: nothing on their Metadata object
 is needed before replication exists, so they are left to the bootstrap's own
 pass. Both this read and the bootstrap's per-collection pass run the same
 read-filter-cache logic, written once in `wasSync.ts` as
-`readGrantedEncryption`. It skips the ungranted collections, reads each
-remaining collection's Metadata object exactly once (reusing a descriptor the
-caller already read for a private one), and keeps only the epoch-bearing
-descriptors. The bootstrap runs that same pass over every granted collection,
-public ones with indexes included, so the encryption declaration, the public
-indexes declaration, and the cipher rebuild ride that one read. The
-blinded-index declaration reads the object again on its own, as noted above.
+`readGrantedEncryption`. It skips the ungranted collections, acquires each
+remaining private collection's descriptor through the governed source exactly
+once (reusing a descriptor the caller already acquired), and keeps only the
+epoch-bearing ones. The bootstrap runs that same pass over every granted
+collection, public ones with indexes included, and reads the Metadata object
+beside the acquisition where its hook wants it (a public collection declaring
+indexes, a private one whose descriptor was not already known), so the public
+indexes declaration, the blinded-index install, and the cipher rebuild ride that
+one read. The login-time pass has no hook and reads no object. The blinded-index
+declaration reads the object again on its own, as noted above.
 
 A Metadata read has two distinct non-answers, and the pass keeps them apart. "No
-descriptor" is a fact about the collection: the read answered not-found (which
-is also how WAS answers an unauthorized read), the backend has no metadata
-support, or the object carries no `encryption` member.
-`readCollectionEncryption` answers `undefined` for exactly that, as a narrow
-read over the same object `readCollectionMeta` returns. A read that fails for
-any other reason (a dropped connection, a 5xx) is thrown, because the answer is
-unknown rather than absent. A caller that took it for "no descriptor" would open
-a correctly provisioned collection under the fail-closed placeholder cipher,
-fail the adoption merge on it, and let a best-effort declaration write a bare
-descriptor over a roster it never saw. Neither read retries on its own; the HTTP
-client underneath already retries transient status codes and network errors on
-every GET. The pass settles every collection and reports the failed ones beside
-the descriptors, and each caller decides what a failure costs. A login rejects
-the whole connected activation, which falls back to `local` with the error
-surfaced and the anonymous replica intact for a retry. A hot restore adopts
-nothing, so it warns and opens that collection fail-closed instead, and a reload
-while offline still restores the connected session. The bootstrap skips that one
-collection entirely, hook included, with a warning. It keeps whatever cipher it
-opened with (the cached descriptor, or fail-closed) and receives no declaration
-write this session; when the read succeeds on a later session it repairs the
-cipher then. The unknown-epoch refresh source is tolerant too, warning and
-answering `undefined`, since the refresh is already spent by the time it is
-consulted and the decrypt retry fails the same way it would under no refresh at
+descriptor" is a fact about the collection: the governed source found no log, or
+the object read answered not-found (which is also how WAS answers an
+unauthorized read), the backend has no metadata support, or the object carries
+no `encryption` member. `readCollectionMeta` answers `undefined` for exactly
+that. A read that fails for any other reason (a dropped connection, a 5xx) is
+thrown, because the answer is unknown rather than absent. A caller that took it
+for "no descriptor" would open a correctly provisioned collection under the
+fail-closed placeholder cipher and fail the adoption merge on it. Neither read
+retries on its own; the HTTP client underneath already retries transient status
+codes and network errors on every GET. The pass settles every collection and
+reports the failed ones beside the descriptors, and each caller decides what a
+failure costs. A login rejects the whole connected activation, which falls back
+to `local` with the error surfaced and the anonymous replica intact for a retry.
+A hot restore adopts nothing, so it warns and opens that collection fail-closed
+instead, and a reload while offline still restores the connected session. The
+bootstrap skips that one collection entirely, hook included, with a warning. It
+keeps whatever cipher it opened with (the cached descriptor, or fail-closed) and
+receives no declaration write this session; when the read succeeds on a later
+session it repairs the cipher then. The unknown-epoch refresh is the one place a
+failed read costs nothing further: the refresh is spent by the time the source
+answers, and the decrypt retry fails the same way it would under no refresh at
 all.
 
 A descriptor's epoch roster can also simply not include this app: not "no

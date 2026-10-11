@@ -21,6 +21,7 @@ import { isIntegrityError } from '@interop/was-client/sync'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ownerRecipient,
+  UnverifiedDescriptorError,
   x25519RecipientFromDidKey
 } from '@interop/was-client/edv'
 import type { CollectionEncryption } from '@interop/was-client'
@@ -187,6 +188,56 @@ describe('SharedCollectionReader', () => {
         collectionId: COLLECTION_ID
       })
     ).rejects.toThrow(SharedCollectionUnavailableError)
+  })
+
+  it('refuses a source that does not verify the governing log', async () => {
+    // A host that strips the governing history from the served projection
+    // and serves an epoch it minted looks, through a plain source, exactly
+    // like an honest point-state roster this app is in. The reader never
+    // asks such a source: it is refused up front, as itself rather than as
+    // "not a recipient", since the fix is to read through a verifying source.
+    const app = await deriveIdentity({ seed: APP_SEED })
+    const encryption = await mintRoster({
+      recipients: [
+        ownerRecipient({ keyAgreementKey: app.keyAgreementKey }),
+        x25519RecipientFromDidKey({ did: app.controllerDid })
+      ]
+    })
+    const remoteStore = fakeRemoteStore({
+      collectionId: COLLECTION_ID,
+      encryption,
+      resources: {},
+      plainSource: true
+    })
+    const open = SharedCollectionReader.open({
+      remoteStore,
+      keyAgreementKey: app.keyAgreementKey,
+      keyResolver: app.keyResolver,
+      collectionId: COLLECTION_ID
+    })
+    await expect(open).rejects.toThrow(UnverifiedDescriptorError)
+    await expect(open).rejects.not.toThrow(SharedCollectionUnavailableError)
+    expect(remoteStore.encryptionReads()).toBe(0)
+  })
+
+  it('rethrows a failed descriptor read rather than reading it as no share', async () => {
+    // `acquireDescriptor` swallows a thrown fetch and falls back to the
+    // reader's empty cache, which would build a roster-less cipher and report
+    // "not a recipient" over a dropped connection. The outage surfaces as
+    // itself: "unknown" is kept apart from "no share".
+    const app = await deriveIdentity({ seed: APP_SEED })
+    const outage = new Error('connection dropped')
+    const open = SharedCollectionReader.open({
+      remoteStore: fakeRemoteStore({
+        collectionId: COLLECTION_ID,
+        resources: {},
+        descriptorReadError: outage
+      }),
+      keyAgreementKey: app.keyAgreementKey,
+      keyResolver: app.keyResolver,
+      collectionId: COLLECTION_ID
+    })
+    await expect(open).rejects.toBe(outage)
   })
 
   it('refuses a roster this app is not a recipient of', async () => {

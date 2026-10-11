@@ -60,7 +60,12 @@ import {
 } from './docCipher.js'
 import { log } from '../log.js'
 import { remotePayloadWins } from '@interop/social-core'
-import { epochRostersEqual, hasKeyEpochs } from '@interop/was-client/edv'
+import {
+  epochRostersEqual,
+  hasKeyEpochs,
+  UnverifiedDescriptorError
+} from '@interop/was-client/edv'
+import { acquireGovernedDescriptor } from './governedDescriptors.js'
 import { isIntegrityError, isUnknownEpochError } from '@interop/was-client/sync'
 import type {
   IKeyAgreementKey,
@@ -222,14 +227,19 @@ export class LocalStore {
   // stored `/meta` value carrying the blinded-index schema), kept so a cipher
   // rebuild re-installs the schema instead of silently dropping it.
   #metas: Record<string, { custom?: unknown }>
-  // Reads a private collection's fresh encryption descriptor (a live Collection
-  // Description read); injected once a remote store exists. Absent offline /
-  // local-only, in which case an unknown epoch simply propagates.
+  // Reads a private collection's fresh encryption descriptor (the verified
+  // head of its governing log); injected once a remote store exists. Absent
+  // offline / local-only, in which case an unknown epoch simply propagates.
   #descriptorSource?: EncryptionDescriptorSource
   // The once-per-collection-per-session unknown-epoch guard, and the in-flight
   // refresh each collection's concurrent decrypts share (see `#spendRefresh`).
   readonly #refreshPolicy: DescriptorRefreshPolicy
   readonly #refreshing = new Map<string, Promise<void>>()
+  // Per collection, the refusal its refresh met: a source that does not
+  // verify the governing log. Kept so the decrypt that spent the refresh, and
+  // every later one, surfaces that refusal as itself rather than as the
+  // envelope's unknown epoch (see `#decryptWithRefresh`).
+  readonly #refusals = new Map<string, UnverifiedDescriptorError>()
 
   private constructor({
     db,
@@ -262,10 +272,12 @@ export class LocalStore {
     this.#metas = {}
     // The whole swap an unknown epoch calls for, handed to the policy that
     // rations it: re-read the collection's descriptor through the installed
-    // source and rebuild that collection's cipher from it. With no source, or
-    // a collection the registry does not carry, or a read that answers no
-    // descriptor, nothing is swapped and the retry fails as the first attempt
-    // did.
+    // source, under `requireGoverned` (a source that does not verify the
+    // governing log is refused with `UnverifiedDescriptorError`, which
+    // propagates as itself), and rebuild that collection's cipher from it.
+    // With no source, or a collection the registry does not carry, or a read
+    // that answers no descriptor, nothing is swapped and the retry fails as
+    // the first attempt did.
     this.#refreshPolicy = new DescriptorRefreshPolicy({
       refresh: async ({ collectionId }: { collectionId: string }) => {
         const key = this.#keyByCollectionId.get(collectionId)
@@ -273,7 +285,20 @@ export class LocalStore {
         if (key === undefined || !source) {
           return
         }
-        const encryption = await source.collectionEncryption({ collectionId })
+        let encryption: CollectionEncryption | undefined
+        try {
+          encryption = await acquireGovernedDescriptor({ source, collectionId })
+        } catch (err) {
+          // A refused source stays refused for the session (the source is
+          // installed once), so the refresh is spent rather than un-armed:
+          // the policy would otherwise re-ask on every decrypt. The refusal
+          // is what the decrypt surfaces.
+          if (err instanceof UnverifiedDescriptorError) {
+            this.#refusals.set(collectionId, err)
+            return
+          }
+          throw err
+        }
         if (hasKeyEpochs(encryption)) {
           await this.rebuildCipher({ key, encryption })
         }
@@ -460,16 +485,18 @@ export class LocalStore {
   }
 
   /**
-   * Installs the encryption-descriptor source: one live Collection Description
-   * read per collection id. Called once a remote store exists; a decrypt that
-   * meets an unknown key epoch uses it to re-read the descriptor and rebuild
-   * that collection's cipher, at most once per collection per session.
+   * Installs the encryption-descriptor source: one verified governing-log read
+   * per collection id (the remote store's log-governed source). Called once a
+   * remote store exists; a decrypt that meets an unknown key epoch uses it to
+   * re-read the descriptor, under `requireGoverned`, and rebuild that
+   * collection's cipher, at most once per collection per session.
    *
    * @param source {EncryptionDescriptorSource}
    * @returns {void}
    */
   setDescriptorSource(source: EncryptionDescriptorSource): void {
     this.#descriptorSource = source
+    this.#refusals.clear()
   }
 
   /**
@@ -507,6 +534,10 @@ export class LocalStore {
       }
       const { id: collectionId } = this.collectionConfig(key)
       await this.#spendRefresh(collectionId)
+      const refusal = this.#refusals.get(collectionId)
+      if (refusal) {
+        throw refusal
+      }
       // One retry, under the (possibly) swapped cipher. When the refresh was
       // already spent this is a purely local re-attempt that fails the same
       // way, so a genuinely foreign envelope still surfaces its unknown epoch
@@ -677,6 +708,7 @@ export class LocalStore {
     await this.rebuildCipher({ key, encryption })
     this.#refreshPolicy.reset({ collectionId })
     this.#refreshing.delete(collectionId)
+    this.#refusals.delete(collectionId)
     return true
   }
 

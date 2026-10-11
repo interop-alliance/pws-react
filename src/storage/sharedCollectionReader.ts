@@ -36,13 +36,14 @@
  *   expected, not corruption -- they are skipped with a warning.
  */
 import { NotImplementedError } from '@interop/was-client'
-import type { Collection, CollectionEncryption } from '@interop/was-client'
+import type { Collection } from '@interop/was-client'
 import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
 import {
   createRefreshingEdvDocCipher,
+  UnverifiedDescriptorError,
   type EncryptionDescriptorCache,
   type EncryptionDescriptorSource
 } from '@interop/was-client/edv'
@@ -52,10 +53,8 @@ import {
   type DocCipher
 } from '@interop/was-client/sync'
 import type { Json } from '@interop/was-sync'
-import {
-  remoteDescriptorSource,
-  type WasRemoteStore
-} from './wasRemoteStore.js'
+import type { WasRemoteStore } from './wasRemoteStore.js'
+import { fetchErrorSink, memoryDescriptorCache } from './governedDescriptors.js'
 import { log } from '../log.js'
 
 /**
@@ -157,7 +156,7 @@ export class SharedCollectionReader {
       collectionId,
       keyAgreementKey,
       keyResolver,
-      source: remoteDescriptorSource({ remoteStore }),
+      source: remoteStore.descriptorSource,
       cache: memoryDescriptorCache()
     })
     return new SharedCollectionReader({
@@ -411,34 +410,6 @@ export class SharedCollectionReader {
 }
 
 /**
- * The reader's descriptor cache: a plain in-memory Map, one per reader. Nothing
- * about a WALLET-owned collection belongs in this app's offline descriptor
- * cache (that one is keyed by the app's own collection ids and survives a
- * reload); here the cache exists only so the self-refreshing cipher has the
- * durable seam it is written against, and so the descriptor it acquired at open
- * can be inspected afterwards.
- *
- * @returns {EncryptionDescriptorCache}
- */
-function memoryDescriptorCache(): EncryptionDescriptorCache {
-  const descriptors = new Map<string, CollectionEncryption>()
-  return {
-    async readDescriptor({ collectionId }: { collectionId: string }) {
-      return descriptors.get(collectionId)
-    },
-    async writeDescriptor({
-      collectionId,
-      descriptor
-    }: {
-      collectionId: string
-      descriptor: CollectionEncryption
-    }) {
-      descriptors.set(collectionId, descriptor)
-    }
-  }
-}
-
-/**
  * Builds the self-refreshing epoch-aware cipher for a shared collection,
  * turning the two "cannot read this collection" outcomes into one descriptive
  * error: no multi-recipient roster at all, and a roster this app is not in.
@@ -447,7 +418,17 @@ function memoryDescriptorCache(): EncryptionDescriptorCache {
  * fetches through `source` and caches the result), so the roster check below
  * reads the cache rather than fetching a second time. A descriptor with no
  * epochs builds a single-key cipher rather than throwing, which is why the
- * no-roster case is detected after the build and not before it.
+ * no-roster case is detected after the build and not before it. A fetch that
+ * fails is a third outcome, kept apart from both: it is rethrown as itself
+ * rather than read as a missing share.
+ *
+ * The acquisition runs under `requireGoverned`: the source must declare
+ * `verifiesHistory` (the store's log-governed source does), and the build and
+ * every later unknown-epoch refresh adopt only a verified log head. The cache
+ * is the reader's own in-memory one: nothing about a WALLET-owned collection
+ * belongs in this app's offline descriptor cache, and the cache exists here
+ * so the self-refreshing cipher has the seam it is written against and so the
+ * descriptor acquired at open can be inspected afterwards.
  *
  * Only the cipher's `decrypt` is ever exercised here -- the reader has no write
  * path -- so the seam's write-side id model is irrelevant and left at its
@@ -475,15 +456,31 @@ async function buildSharedCipher({
   cache: EncryptionDescriptorCache
 }): Promise<DocCipher> {
   let cipher: DocCipher
+  // A fetch that fails during the build is swallowed by `acquireDescriptor`
+  // (it falls back to the cache, empty here), which would make an outage read
+  // as "not a recipient". It is rethrown as itself, whether the build then
+  // fails or completes, so "unknown" stays apart from "no share"; a fetch
+  // failure met by a later unknown-epoch refresh is the cipher's own concern.
+  const sink = fetchErrorSink()
   try {
     cipher = (await createRefreshingEdvDocCipher({
       keyAgreementKey,
       keyResolver,
       collectionId,
       source,
-      cache
+      cache,
+      requireGoverned: true,
+      onFetchError: sink.onFetchError
     })) as unknown as DocCipher
   } catch (err) {
+    // A build that fails over a swallowed fetch failed because of it.
+    sink.rethrow()
+    // A refused source is a wiring fault, not a share this app lacks: the
+    // error names the fix (read through a log-governed source), so it is
+    // surfaced as itself rather than as "not a recipient".
+    if (err instanceof UnverifiedDescriptorError) {
+      throw err
+    }
     throw new SharedCollectionUnavailableError(
       `Cannot read shared collection "${collectionId}": this app is not a ` +
         `recipient of any of its key epochs. The wallet has not shared it ` +
@@ -492,6 +489,7 @@ async function buildSharedCipher({
       { cause: err }
     )
   }
+  sink.rethrow()
   const encryption = await cache.readDescriptor({ collectionId })
   if (!encryption?.epochs || encryption.epochs.length === 0) {
     throw new SharedCollectionUnavailableError(

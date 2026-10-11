@@ -11,6 +11,7 @@
 import { Collection, NotImplementedError } from '@interop/was-client'
 import type { CollectionEncryption } from '@interop/was-client'
 import type { WasRemoteStore } from '../../src/storage/wasRemoteStore.js'
+import { fakeDescriptorSource } from './descriptorSource.js'
 
 /**
  * One entry of the fake `changes` feed: a Resource (a live document with its
@@ -44,9 +45,14 @@ export interface FakeRemoteStoreProbes {
  * the `changes-query` feature, forcing the `list()` + `get()` fallback. With
  * neither, the feed mirrors `resources`.
  *
- * `descriptors` scripts successive `readCollectionEncryption` answers (the
- * last one repeats), so an unknown-epoch refresh can be observed;
- * `encryptionReads` counts them. `encryption` is the one-descriptor shorthand.
+ * `descriptors` scripts the successive answers of the fake's
+ * `descriptorSource` (the last one repeats), so an unknown-epoch refresh can
+ * be observed; `encryptionReads` counts them. `encryption` is the
+ * one-descriptor shorthand. The source declares `verifiesHistory: true`, as
+ * the real store's log-governed source does; `plainSource` withholds the
+ * flag, which is what a reader under `requireGoverned` must refuse.
+ * `descriptorReadError` makes every read throw it instead of answering, the
+ * shape of a dropped connection or a 5xx.
  *
  * @param options {object}
  * @param options.collectionId {string}
@@ -56,6 +62,8 @@ export interface FakeRemoteStoreProbes {
  * @param options.resources {object}
  * @param [options.changes] {FakeChange[]}
  * @param [options.changesNotImplemented] {boolean}
+ * @param [options.plainSource] {boolean}
+ * @param [options.descriptorReadError] {Error}
  * @returns {WasRemoteStore & FakeRemoteStoreProbes}
  */
 export function fakeRemoteStore({
@@ -65,7 +73,9 @@ export function fakeRemoteStore({
   descriptors,
   resources,
   changes,
-  changesNotImplemented = false
+  changesNotImplemented = false,
+  plainSource = false,
+  descriptorReadError
 }: {
   collectionId: string
   spaceId?: string
@@ -74,6 +84,8 @@ export function fakeRemoteStore({
   resources: Record<string, unknown>
   changes?: FakeChange[]
   changesNotImplemented?: boolean
+  plainSource?: boolean
+  descriptorReadError?: Error
 }): WasRemoteStore & FakeRemoteStoreProbes {
   const feed: FakeChange[] =
     changes ?? Object.entries(resources).map(([id, data]) => ({ id, data }))
@@ -152,12 +164,16 @@ export function fakeRemoteStore({
     collectionCapability() {
       return { id: 'urn:zcap:delegated:1' }
     },
-    async readCollectionEncryption() {
-      const descriptor =
-        scripted[Math.min(encryptionReads, scripted.length - 1)]
-      encryptionReads++
-      return descriptor
-    },
+    descriptorSource: fakeDescriptorSource({
+      plain: plainSource,
+      collectionEncryption: async () => {
+        encryptionReads++
+        if (descriptorReadError) {
+          throw descriptorReadError
+        }
+        return scripted[Math.min(encryptionReads - 1, scripted.length - 1)]
+      }
+    }),
     encryptionReads: () => encryptionReads,
     resourceGets: () => resourceGets,
     checkpointsRequested: () => checkpointsRequested

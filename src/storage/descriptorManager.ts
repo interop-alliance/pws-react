@@ -16,6 +16,7 @@
  * warned about, rather than failing the session.
  */
 import type { CollectionEncryption } from '@interop/was-client'
+import type { SpaceTrust } from './spaceTrust.js'
 import { mintRecordEncryption } from '@interop/wallet-core/keyring'
 import { isPublicCollection, type WasCollectionConfig } from '../config.js'
 import type { IdentityAgents } from '../identity/agents.js'
@@ -43,6 +44,7 @@ export interface DescriptorManager {
     identity: IdentityAgents
     parsed: ParsedGrants
     onReadFailure: 'reject' | 'skip'
+    trust?: SpaceTrust
   }): Promise<{
     descriptors?: Record<string, CollectionEncryption>
     fresh: Record<string, CollectionEncryption>
@@ -218,6 +220,8 @@ export function createDescriptorManager({
    * @param options.identity {IdentityAgents}
    * @param options.parsed {ParsedGrants}
    * @param options.onReadFailure {'reject' | 'skip'}
+   * @param [options.trust] {SpaceTrust}   the activation's Space trust state,
+   *   shared with the sync bootstrap's reads
    * @returns {Promise<object>}   `descriptors` (the completed set, or
    *   undefined when there are none) and `fresh` (the live-read subset)
    */
@@ -225,12 +229,14 @@ export function createDescriptorManager({
     cached,
     identity,
     parsed,
-    onReadFailure
+    onReadFailure,
+    trust
   }: {
     cached?: Record<string, CollectionEncryption>
     identity: IdentityAgents
     parsed: ParsedGrants
     onReadFailure: 'reject' | 'skip'
+    trust?: SpaceTrust
   }): Promise<{
     descriptors?: Record<string, CollectionEncryption>
     fresh: Record<string, CollectionEncryption>
@@ -247,7 +253,8 @@ export function createDescriptorManager({
     const { descriptors: fetched, failures } = await readRemoteDescriptors({
       parsed,
       zcapClient: identity.zcapClient,
-      collections: missing
+      collections: missing,
+      ...(trust && { trust })
     })
     if (failures.length > 0) {
       if (onReadFailure === 'reject') {

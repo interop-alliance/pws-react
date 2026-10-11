@@ -11,11 +11,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { CollectionEncryption } from '@interop/was-client'
+import { UnverifiedDescriptorError } from '@interop/was-client/edv'
 import type { WasCollectionConfig } from '../config.js'
 import type { ParsedGrants } from '../grants.js'
 import type { LocalStore } from './localStore.js'
 import type { SyncController } from './syncController.js'
 import { WasRemoteStore, type CollectionMetaRead } from './wasRemoteStore.js'
+import { fakeDescriptorSource } from '../../test/fixtures/descriptorSource.js'
 import { readRemoteDescriptors, startWasSync } from './wasSync.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../log.js'
@@ -50,17 +52,29 @@ const stored = { jwe: { protected: 'opaque' } } as unknown as NonNullable<
 >
 
 /**
- * A remote store whose metadata read answers per collection id: a descriptor
- * (served as the `encryption` member of a stored object carrying `custom`),
- * `undefined` (the object carries no descriptor), or a rejection. `wrote`
- * scripts what the blinded-index declaration reports; every other declaration
- * verb is a resolved no-op that records its call.
+ * A remote store whose log-governed descriptor source answers per collection
+ * id: a descriptor (the verified log head), `undefined` (no governing log), or
+ * a rejection; its Metadata read serves a stored object carrying `custom` and
+ * the same descriptor as its `encryption` projection. The source declares
+ * `verifiesHistory: true` as the real one does, unless `plainSource` withholds
+ * the flag. `wrote` scripts what the blinded-index declaration reports; every
+ * other declaration verb is a resolved no-op that records its call.
  */
 function stubRemoteStore(
   reads: Record<string, CollectionEncryption | undefined | Error>,
-  { wrote = false }: { wrote?: boolean } = {}
+  { wrote = false, plainSource = false } = {}
 ) {
   const stub = {
+    descriptorSource: fakeDescriptorSource({
+      plain: plainSource,
+      collectionEncryption: async ({ collectionId }) => {
+        const answer = reads[collectionId]
+        if (answer instanceof Error) {
+          throw answer
+        }
+        return answer
+      }
+    }),
     readCollectionMeta: vi.fn(
       async (collectionId: string): Promise<CollectionMetaRead | undefined> => {
         const answer = reads[collectionId]
@@ -78,11 +92,6 @@ function stubRemoteStore(
         }
       }
     ),
-    markCollectionEncrypted: vi.fn(async (collectionId: string) => ({
-      collectionId,
-      ok: true,
-      skipped: true
-    })),
     declareBlindedIndexes: vi.fn(async (collectionId: string) => ({
       collectionId,
       ok: true,
@@ -124,6 +133,84 @@ describe('readRemoteDescriptors', () => {
       await readRemoteDescriptors({ parsed, zcapClient, collections })
     ).toEqual({ descriptors: { notes: descriptor }, failures: [] })
   })
+
+  it('refuses a source that does not verify the governing log, per collection', async () => {
+    // A stripped projection with a host-minted epoch is indistinguishable
+    // from an honest point-state descriptor through a plain source, so the
+    // source is refused before it is asked and nothing it would have served
+    // is adopted.
+    const remote = stubRemoteStore(
+      { notes: descriptor, tasks: descriptor },
+      { plainSource: true }
+    )
+    const outcome = await readRemoteDescriptors({
+      parsed,
+      zcapClient,
+      collections
+    })
+    expect(outcome.descriptors).toEqual({})
+    expect(outcome.failures.map(({ collection }) => collection)).toEqual(
+      collections
+    )
+    for (const { err } of outcome.failures) {
+      expect(err).toBeInstanceOf(UnverifiedDescriptorError)
+    }
+    expect(remote.descriptorSource.collectionEncryption).not.toHaveBeenCalled()
+  })
+
+  it('does not take a Metadata object read for the descriptor', async () => {
+    // The login-time read wants nothing off the Metadata object: the
+    // descriptor is the verified log head, never the served projection.
+    const remote = stubRemoteStore({ notes: descriptor, tasks: undefined })
+    await readRemoteDescriptors({ parsed, zcapClient, collections })
+    expect(remote.readCollectionMeta).not.toHaveBeenCalled()
+  })
+})
+
+describe('startWasSync under a refused source', () => {
+  it('installs nothing and caches nothing', async () => {
+    const capture = captureLogger('wr')
+    const previous = setLogger(capture.logger)
+    const remote = stubRemoteStore(
+      { notes: descriptor, tasks: descriptor },
+      { plainSource: true }
+    )
+    const localStore = {
+      applyRemoteDescriptor: vi.fn(async () => {}),
+      applyCollectionMeta: vi.fn(async () => {}),
+      setDescriptorSource: vi.fn()
+    }
+    const syncController = { start: vi.fn(async () => {}) }
+    const fetched = vi.fn()
+    try {
+      await startWasSync({
+        parsed,
+        zcapClient,
+        collections,
+        localStore: localStore as unknown as LocalStore,
+        syncController: syncController as unknown as SyncController,
+        onRemoteChange: () => {},
+        onDescriptorsFetched: fetched
+      })
+    } finally {
+      setLogger(previous)
+    }
+    expect(localStore.applyRemoteDescriptor).not.toHaveBeenCalled()
+    expect(localStore.applyCollectionMeta).not.toHaveBeenCalled()
+    expect(fetched).toHaveBeenCalledWith({})
+    expect(
+      capture.events.filter(
+        event =>
+          event.level === 'warn' &&
+          event.err instanceof UnverifiedDescriptorError
+      )
+    ).toHaveLength(2)
+    // The refused source is still the one installed for later refreshes: it
+    // is refused there too, as itself.
+    expect(localStore.setDescriptorSource).toHaveBeenCalledWith(
+      remote.descriptorSource
+    )
+  })
 })
 
 describe('startWasSync descriptor read failure', () => {
@@ -157,9 +244,6 @@ describe('startWasSync descriptor read failure', () => {
       collectionId: 'notes',
       encryption: descriptor
     })
-    expect(remote.markCollectionEncrypted.mock.calls.map(([id]) => id)).toEqual(
-      ['notes']
-    )
     expect(
       remote.declareCollectionIndexes.mock.calls.map(([id]) => id)
     ).toEqual(['notes'])
@@ -224,11 +308,7 @@ describe('startWasSync blinded-index schema install', () => {
       collectionId: 'notes',
       custom: stored
     })
-    // The declarations were handed that same object.
-    expect(remote.markCollectionEncrypted).toHaveBeenCalledWith('notes', {
-      current: expect.objectContaining({ etag: '"v1"' }),
-      encryption: blinded
-    })
+    // The declaration was handed that same object.
     expect(remote.declareCollectionIndexes).toHaveBeenCalledWith('tasks', {
       current: expect.objectContaining({ etag: '"v1"' })
     })
@@ -258,11 +338,6 @@ describe('startWasSync blinded-index schema install', () => {
     expect(
       remote.readCollectionMeta.mock.calls.map(([id]) => id).sort()
     ).toEqual(['notes', 'tasks'])
-    // A known descriptor is already epoch-bearing, so the encryption
-    // declaration is handed it (and no read object) and skips the write.
-    expect(remote.markCollectionEncrypted).toHaveBeenCalledWith('notes', {
-      encryption: blinded
-    })
     expect(localStore.applyCollectionMeta).toHaveBeenCalledWith({
       collectionId: 'notes',
       custom: stored

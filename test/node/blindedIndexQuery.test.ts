@@ -170,7 +170,9 @@ describe('blinded-index query against was-teaching-server', () => {
 
     // Re-declaring is a no-op: only missing attributes are written.
     const again = await remoteStore.declareBlindedIndexes(PRIVATE_ID, {
-      encryption: await remoteStore.readCollectionEncryption(PRIVATE_ID)
+      encryption: await remoteStore.descriptorSource.collectionEncryption({
+        collectionId: PRIVATE_ID
+      })
     })
     expect(again).toEqual({ collectionId: PRIVATE_ID, ok: true, wrote: false })
     const unchanged = await collectionHandle().indexes()

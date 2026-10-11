@@ -153,7 +153,6 @@ export { getWriterId, clearPersistedWriterId } from './storage/writerId.js'
 export { createEntityStore, type EntityStore } from './storage/entityStore.js'
 export {
   WasRemoteStore,
-  remoteDescriptorSource,
   type DeclarationResult,
   type EqualityQueryPage
 } from './storage/wasRemoteStore.js'

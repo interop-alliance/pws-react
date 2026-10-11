@@ -10,10 +10,22 @@ import type {
 } from '@interop/data-integrity-core'
 import { NotImplementedError, WasServerError } from '@interop/was-client'
 import type { CollectionMetadata } from '@interop/was-client'
-import { WasRemoteStore, remoteDescriptorSource } from './wasRemoteStore.js'
+import { WasRemoteStore } from './wasRemoteStore.js'
+import { createSpaceTrust } from './spaceTrust.js'
 import type { ParsedGrants } from '../grants.js'
-import { captureLogger } from '@interop/logger'
-import { setLogger } from '../log.js'
+import { resolveSpaceOwner } from '../identity/spaceOwner.js'
+
+// The source builder is captured so its `resolveController` and `pinStore`
+// wiring can be exercised without a log to read.
+vi.mock('@interop/wallet-core/descriptors', async importOriginal => {
+  const actual =
+    await importOriginal<typeof import('@interop/wallet-core/descriptors')>()
+  return {
+    ...actual,
+    logGovernedDescriptorSource: vi.fn(actual.logGovernedDescriptorSource)
+  }
+})
+vi.mock('../identity/spaceOwner.js', () => ({ resolveSpaceOwner: vi.fn() }))
 
 const parsed: ParsedGrants = {
   serverUrl: 'https://was.example',
@@ -191,201 +203,56 @@ function fakeCollectionHandle(
   return calls
 }
 
-describe('WasRemoteStore.markCollectionEncrypted', () => {
-  it('skips the descriptor write for a public collection (ok + skipped)', async () => {
-    const store = WasRemoteStore.fromGrants({
-      parsed,
-      zcapClient,
-      collections: [
-        { key: 'posts', id: 'microblog-posts', visibility: 'public' },
-        { key: 'notes', id: 'notes' }
-      ]
-    })
-    // Resolves without any network round trip: the write is never attempted.
-    const result = await store.markCollectionEncrypted('microblog-posts', {
-      current: metaRead({ id: 'microblog-posts', type: ['Collection'] })
-    })
-    expect(result).toEqual({
-      collectionId: 'microblog-posts',
-      ok: true,
-      skipped: true
-    })
+/**
+ * The options the store handed `logGovernedDescriptorSource` on its last
+ * build.
+ */
+async function sourceOptions() {
+  const { logGovernedDescriptorSource } =
+    await import('@interop/wallet-core/descriptors')
+  const calls = vi.mocked(logGovernedDescriptorSource).mock.calls
+  return calls[calls.length - 1]![0]
+}
+
+describe('WasRemoteStore.descriptorSource', () => {
+  it('is a verifying source, built once per store', () => {
+    const remoteStore = WasRemoteStore.fromGrants({ parsed, zcapClient })
+    const source = remoteStore.descriptorSource
+    expect(source.verifiesHistory).toBe(true)
+    expect(remoteStore.descriptorSource).toBe(source)
   })
 
-  it('reports a missing capability for an ungranted private collection', async () => {
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient })
-    const result = await store.markCollectionEncrypted('unknown-collection', {})
-    expect(result).toEqual({
-      collectionId: 'unknown-collection',
-      ok: false,
-      error: 'no capability'
-    })
+  it('resolves the Space owner once, but retries a failed resolution', async () => {
+    const owner = vi.mocked(resolveSpaceOwner)
+    owner.mockReset()
+    owner
+      .mockRejectedValueOnce(new Error('server unreachable'))
+      .mockResolvedValue({ did: 'did:webvh:x', log: [] } as never)
+    void WasRemoteStore.fromGrants({ parsed, zcapClient }).descriptorSource
+    const { resolveController } = await sourceOptions()
+    await expect(resolveController()).rejects.toThrow('server unreachable')
+    // The rejection is not remembered: the next read resolves again.
+    await resolveController()
+    await resolveController()
+    expect(owner).toHaveBeenCalledTimes(2)
   })
 
-  it('skips the write when the collection already carries an epoch roster', async () => {
-    // The caller knows a descriptor with epochs for the collection; the
-    // bare-descriptor write that would clobber it must never be attempted.
-    const { calls, zcapClient: stub } = stubZcapClient([{ status: 200 }])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
-    const encryption = {
-      scheme: 'edv' as const,
-      currentEpoch: 'did:key:zEpoch1',
-      epochs: [{ id: 'did:key:zEpoch1', recipients: [] }]
-    }
-    expect(
-      await store.markCollectionEncrypted('notes', {
-        current: metaRead({ id: 'notes', type: ['Collection'], encryption }),
-        encryption
-      })
-    ).toEqual({ collectionId: 'notes', ok: true, skipped: true })
-    // No round trips at all: the guard turns on the descriptor already on
-    // the read object, before a capability or a write is even considered.
-    expect(calls).toHaveLength(0)
-  })
-
-  it('refuses the write when the metadata object was not read', async () => {
-    // Under v0.5 the write replaces the whole object; with nothing read there
-    // is nothing to merge into, and a bare descriptor would clear the rest.
-    const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
-    const result = await store.markCollectionEncrypted('notes', {})
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/was not read/)
-    expect(calls).toHaveLength(0)
-  })
-
-  it('merges the bare descriptor into the object it was handed', async () => {
-    const { calls, zcapClient: stub } = stubZcapClient([
-      { status: 204, etag: '"v2"' } // PUT
-    ])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
-    const result = await store.markCollectionEncrypted('notes', {
-      current: metaRead({
-        id: 'notes',
-        type: ['Collection'],
-        name: 'Notes',
-        url: 'https://was.example/space/space-1/notes/',
-        createdAt: '2026-01-01T00:00:00Z'
-      })
-    })
-    expect(result).toEqual({ collectionId: 'notes', ok: true })
-    // One PUT of the whole object at `meta`, pinned to the read's validator:
-    // the stored `name` rides along, the server-managed members do not, and
-    // no second read was spent.
-    expect(calls).toHaveLength(1)
-    expect(calls[0]).toMatchObject({
-      url: 'https://was.example/space/space-1/notes/meta',
-      method: 'PUT',
-      capability: { id: 'urn:zcap:priv' },
-      json: { id: 'notes', name: 'Notes', encryption: { scheme: 'edv' } },
-      headers: { 'if-match': '"v1"' }
-    })
-    expect(calls[0]?.json).not.toHaveProperty('type')
-    expect(calls[0]?.json).not.toHaveProperty('createdAt')
-  })
-
-  it('reports a refused write rather than throwing', async () => {
-    const forbidden = Object.assign(new Error('Forbidden'), { status: 403 })
-    const { zcapClient: stub } = stubZcapClient([
-      { status: 403, error: forbidden }
-    ])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
-    const result = await store.markCollectionEncrypted('notes', {
-      current: metaRead({ id: 'notes', type: ['Collection'] })
-    })
-    expect(result.ok).toBe(false)
-    expect(result.status).toBe(403)
-  })
-})
-
-describe('WasRemoteStore.readCollectionEncryption', () => {
-  it('returns the encryption descriptor from the collection metadata object', async () => {
-    const descriptor = {
-      scheme: 'edv',
-      currentEpoch: 'did:key:zEpoch1',
-      epochs: [{ id: 'did:key:zEpoch1', recipients: [] }]
-    }
-    const { calls, zcapClient: stub } = stubZcapClient([
-      {
-        status: 200,
-        data: { id: 'notes', type: ['Collection'], encryption: descriptor }
-      }
-    ])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
-    expect(await store.readCollectionEncryption('notes')).toEqual(descriptor)
-    expect(calls[0]).toMatchObject({
-      url: 'https://was.example/space/space-1/notes/meta',
-      method: 'GET',
-      capability: { id: 'urn:zcap:priv' }
-    })
-  })
-
-  it('returns undefined for an unmarked collection and a missing capability', async () => {
-    const { zcapClient: stub } = stubZcapClient([
-      { status: 200, data: { id: 'notes', type: ['Collection'] } }
-    ])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
-    expect(await store.readCollectionEncryption('notes')).toBeUndefined()
-    // No delegated capability covers this id: no request, undefined.
-    const bare = WasRemoteStore.fromGrants({ parsed, zcapClient })
-    expect(await bare.readCollectionEncryption('ungranted')).toBeUndefined()
-  })
-
-  it('returns undefined for a not-found response', async () => {
-    const notFound = Object.assign(new Error('Not Found'), { status: 404 })
-    const { calls, zcapClient: stub } = stubZcapClient([
-      { status: 404, error: notFound }
-    ])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
-    expect(await store.readCollectionEncryption('notes')).toBeUndefined()
-    expect(calls).toHaveLength(1)
-  })
-
-  it('rethrows a transient failure, wrapped with the collection id', async () => {
-    const badGateway = Object.assign(new Error('Bad Gateway'), { status: 502 })
-    const { calls, zcapClient: stub } = stubZcapClient([
-      { status: 502, error: badGateway }
-    ])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
-    const err = (await store.readCollectionEncryption('notes').then(
-      () => undefined,
-      (err: unknown) => err
-    )) as Error
-    expect(err).toBeInstanceOf(Error)
-    expect(err.message).toContain('"notes"')
-    expect(err.cause).toBeInstanceOf(WasServerError)
-    expect((err.cause as WasServerError).status).toBe(502)
-    // Retrying is the HTTP client's job, not this layer's.
-    expect(calls).toHaveLength(1)
-  })
-})
-
-describe('remoteDescriptorSource', () => {
-  it('warns and answers undefined when the read fails', async () => {
-    const capture = captureLogger('wr')
-    const previous = setLogger(capture.logger)
-    try {
-      const { zcapClient: stub } = stubZcapClient([
-        {
-          status: 502,
-          error: Object.assign(new Error('boom'), { status: 502 })
-        }
-      ])
-      const remoteStore = WasRemoteStore.fromGrants({
-        parsed,
-        zcapClient: stub
-      })
-      expect(
-        await remoteDescriptorSource({ remoteStore }).collectionEncryption({
-          collectionId: 'notes'
-        })
-      ).toBeUndefined()
-      expect(
-        capture.events.filter(event => event.level === 'warn')
-      ).toHaveLength(1)
-    } finally {
-      setLogger(previous)
-    }
+  it('shares the owner resolution and the pins of the trust it was given', async () => {
+    const owner = vi.mocked(resolveSpaceOwner)
+    owner.mockReset()
+    owner.mockResolvedValue({ did: 'did:webvh:x', log: [] } as never)
+    const trust = createSpaceTrust(parsed)
+    void WasRemoteStore.fromGrants({ parsed, zcapClient, trust })
+      .descriptorSource
+    const first = await sourceOptions()
+    void WasRemoteStore.fromGrants({ parsed, zcapClient, trust })
+      .descriptorSource
+    const second = await sourceOptions()
+    expect(first.pinStore).toBe(trust.pinStore)
+    expect(second.pinStore).toBe(trust.pinStore)
+    await first.resolveController()
+    await second.resolveController()
+    expect(owner).toHaveBeenCalledTimes(1)
   })
 })
 

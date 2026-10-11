@@ -56,11 +56,13 @@ import type {
 } from '@interop/was-client'
 import { createEdvEncryption } from '@interop/was-client/edv'
 import type { EncryptionDescriptorSource } from '@interop/was-client/edv'
+import { resourceLogStore } from '@interop/was-client/log'
 import { collectionPath, resourcePath, toUrl } from '@interop/was-client/paths'
 import { errorStatus, errorMessage } from '@interop/was-client/sync'
+import { logGovernedDescriptorSource } from '@interop/wallet-core/descriptors'
 import type { WasCollectionConfig } from '../config.js'
 import type { ParsedGrants } from '../grants.js'
-import { log } from '../log.js'
+import { createSpaceTrust, type SpaceTrust } from './spaceTrust.js'
 
 /**
  * The outcome of a best-effort declaration write (the encryption descriptor,
@@ -237,17 +239,23 @@ export class WasRemoteStore {
   // Whether `fromGrants` was given this app's identity keys, i.e. whether the
   // client's EDV keystore can build a codec (the blinded-index verbs need one).
   readonly #hasIdentityKeys: boolean
+  // The source every governed read goes through (see `descriptorSource`),
+  // built once, and the Space trust state it verifies against.
+  #descriptorSource: EncryptionDescriptorSource | undefined
+  readonly #trust: SpaceTrust
 
   private constructor({
     was,
     parsed,
     configById,
-    hasIdentityKeys
+    hasIdentityKeys,
+    trust
   }: {
     was: WasClient
     parsed: ParsedGrants
     configById: Map<string, CollectionRouting>
     hasIdentityKeys: boolean
+    trust: SpaceTrust
   }) {
     this.was = was
     this.serverUrl = parsed.serverUrl
@@ -255,6 +263,7 @@ export class WasRemoteStore {
     this.#byCollectionId = parsed.byCollectionId
     this.#configById = configById
     this.#hasIdentityKeys = hasIdentityKeys
+    this.#trust = trust
   }
 
   /**
@@ -280,13 +289,20 @@ export class WasRemoteStore {
    *   its resolver (the same pair `IdentityAgents` carries)
    * @param options.keys.keyAgreementKey {IKeyAgreementKey}
    * @param options.keys.keyResolver {IKeyResolver}
+   * @param [options.trust] {SpaceTrust}   the Space owner's verified
+   *   controller view and the chain-head pins the governed descriptor source
+   *   checks against. A session that builds more than one store over the same
+   *   grants passes one shared value, so the owner is resolved once and a head
+   *   served to the second store is checked against what the first pinned;
+   *   the default is a fresh one for this store alone
    * @returns {WasRemoteStore}
    */
   static fromGrants({
     parsed,
     zcapClient,
     collections = [],
-    keys
+    keys,
+    trust = createSpaceTrust(parsed)
   }: {
     parsed: ParsedGrants
     zcapClient: ZcapClient
@@ -295,6 +311,7 @@ export class WasRemoteStore {
       keyAgreementKey: IKeyAgreementKey
       keyResolver: IKeyResolver
     }
+    trust?: SpaceTrust
   }): WasRemoteStore {
     const was = new WasClient({
       serverUrl: parsed.serverUrl,
@@ -316,7 +333,8 @@ export class WasRemoteStore {
       was,
       parsed,
       configById,
-      hasIdentityKeys: keys !== undefined
+      hasIdentityKeys: keys !== undefined,
+      trust
     })
   }
 
@@ -346,9 +364,51 @@ export class WasRemoteStore {
   }
 
   /**
-   * The shared tail of a best-effort `configure`-based declaration write onto
-   * one collection's Metadata object: {@link markCollectionEncrypted} and
-   * {@link declareCollectionIndexes} both end here. With no readable object
+   * The verifying `EncryptionDescriptorSource` (`@interop/was-client/edv`)
+   * every `edv` collection this store reaches is read through: wallet-core's
+   * `logGovernedDescriptorSource` over each collection's `meta/log`, invoked
+   * with THAT collection's delegated zcap (the same grant that reads the
+   * collection covers its log, so no second grant is needed). Every read
+   * resolves the log's verified head, checked against the Space owner's
+   * verified did:webvh account log ({@link SpaceTrust.owner}, resolved once
+   * per trust state rather than per store).
+   *
+   * It declares `verifiesHistory: true`, which is what was-client's
+   * `requireGoverned` admits a source on. A plain Metadata read would let a
+   * host strip the governing history from the served projection and serve an
+   * epoch it minted; this source never reads the projection at all.
+   *
+   * Chain-head pins live in the trust state's pin store (in memory, shared
+   * across the stores one session builds): continuity is checked within a
+   * session, and a reload trusts the served head afresh.
+   *
+   * @returns {EncryptionDescriptorSource}
+   */
+  get descriptorSource(): EncryptionDescriptorSource {
+    this.#descriptorSource ??= logGovernedDescriptorSource({
+      logFor: collectionId => {
+        const capability = this.collectionCapability(collectionId)
+        if (!capability) {
+          throw new Error(
+            `No delegated capability covers collection "${collectionId}", ` +
+              `so its governing log cannot be read.`
+          )
+        }
+        return resourceLogStore({
+          collection: this.#collection(collectionId, capability)
+        })
+      },
+      resolveController: () => this.#trust.owner(),
+      pinStore: this.#trust.pinStore,
+      spaceId: this.spaceId
+    })
+    return this.#descriptorSource
+  }
+
+  /**
+   * The tail of a best-effort `configure`-based declaration write onto one
+   * collection's Metadata object ({@link declareCollectionIndexes}), kept
+   * apart from its caller so the merge rules read in one place. With no readable object
    * there is nothing to merge into, and writing a bare change would replace
    * the whole object under WAS v0.5's full-replacement `PUT`: the write is
    * refused and reported NOT ok rather than attempted.
@@ -457,80 +517,6 @@ export class WasRemoteStore {
   }
 
   /**
-   * Reads one collection's `encryption` descriptor: the {@link readCollectionMeta}
-   * read, narrowed to its {@link CollectionEncryption} member (a
-   * multi-recipient descriptor carries key epochs). It is the
-   * `EncryptionDescriptorSource` seam and the login-time read, so it keeps
-   * that read's contract: `undefined` only when the answer is genuinely "no
-   * descriptor" (no capability, not-found, no metadata support, or an object
-   * with no `encryption` member), and a throw for every other failure, which
-   * must not be taken for "no descriptor" -- a correctly provisioned
-   * collection would then fail its first write or decrypt for a network
-   * hiccup.
-   *
-   * @param collectionId {string}   the WAS collection id
-   * @returns {Promise<CollectionEncryption | undefined>}
-   */
-  async readCollectionEncryption(
-    collectionId: string
-  ): Promise<CollectionEncryption | undefined> {
-    const read = await this.readCollectionMeta(collectionId)
-    return read?.description.encryption
-  }
-
-  /**
-   * Best-effort declaration of the `{ encryption: { scheme: 'edv' } }` descriptor on
-   * one collection, invoked with that collection's delegated RW zcap. Non-fatal:
-   * returns the outcome rather than throwing, so a server that does not authorize
-   * a delegated write of the Metadata object leaves replication untouched (the
-   * collection simply stays unmarked / plaintext, which still stores envelopes).
-   * A PUBLIC collection is never marked (public implies plaintext): the write is
-   * skipped and reported as `ok` + `skipped`.
-   *
-   * A collection that ALREADY carries an `encryption` block is also skipped: the
-   * wallet provisions a multi-recipient epoch roster on the descriptor at consent
-   * time, and overwriting it with the bare `{ scheme: 'edv' }` descriptor would
-   * destroy that roster. So this method is a no-op fallback for servers/wallets
-   * that did not provision the roster. The caller passes the descriptor it
-   * knows for the collection (read off `current`, or from an earlier live
-   * read), and the skip is checked before the merge baseline is even looked
-   * for: a collection already carrying a roster needs no write regardless of
-   * whether its object was read this bring-up.
-   *
-   * With no readable object there is nothing to merge into, and a blind write
-   * would replace the whole object with a bare descriptor: the write is
-   * refused and reported NOT ok instead (the shared merge tail below).
-   *
-   * @param collectionId {string}   the WAS collection id
-   * @param options {object}
-   * @param [options.current] {CollectionMetaRead}   the collection's Metadata
-   *   object as the caller read it, the baseline the declaration merges into;
-   *   absent when the caller did not read it or could not
-   * @param [options.encryption] {CollectionEncryption}   the descriptor the
-   *   caller knows the collection carries; present means there is nothing to
-   *   declare
-   * @returns {Promise<DeclarationResult>}
-   */
-  async markCollectionEncrypted(
-    collectionId: string,
-    {
-      current,
-      encryption
-    }: { current?: CollectionMetaRead; encryption?: CollectionEncryption }
-  ): Promise<DeclarationResult> {
-    if (this.#configById.get(collectionId)?.visibility === 'public') {
-      return { collectionId, ok: true, skipped: true }
-    }
-    if (encryption) {
-      return { collectionId, ok: true, skipped: true }
-    }
-    return await this.#configure(collectionId, {
-      current,
-      change: () => ({ encryption: { scheme: 'edv' } })
-    })
-  }
-
-  /**
    * Best-effort declaration of a public collection's equality-indexed
    * attributes (`{ plaintext: { indexes: [...] } }`) on its Metadata object,
    * invoked with that collection's delegated RW zcap. The `plaintext` member
@@ -548,8 +534,7 @@ export class WasRemoteStore {
    * expanded entry is not read as drift.
    *
    * The write is a merge into the object the caller already read
-   * (`Collection.configure`, the same path {@link markCollectionEncrypted}
-   * takes): the stored `plaintext` object is sent back with its `indexes`
+   * (`Collection.configure`): the stored `plaintext` object is sent back with its `indexes`
    * replaced, and every other member -- `name`, `backend`, the `custom`
    * envelope, anything this client does not model -- is carried forward,
    * pinned to the read's validator. A lost race is re-read and rebased by
@@ -899,49 +884,6 @@ export class WasRemoteStore {
       })),
       hasMore: page.hasMore,
       ...(typeof page.cursor === 'string' && { cursor: page.cursor })
-    }
-  }
-}
-
-/**
- * The `EncryptionDescriptorSource` (`@interop/was-client/edv`) over a
- * delegated {@link WasRemoteStore}: one Collection Metadata read per
- * collection, invoked with THAT collection's delegated zcap. It is the seam the
- * descriptor-refresh machinery -- the local store's unknown-epoch policy and a
- * shared collection's self-refreshing cipher -- re-reads a rotated key-epoch
- * roster through.
- *
- * Deliberately NOT `wasDescriptorSource` from the same subpath: that one
- * describes through the client's root capability, which a requester never
- * holds. Every read here must invoke the per-collection grant, which is
- * exactly what {@link WasRemoteStore.readCollectionEncryption} does.
- *
- * A read that fails for a transient reason is warned about and answered as
- * `undefined` here: the refresh guard is already spent by the time the source
- * is consulted, so the decrypt retry fails the same way it would under no
- * refresh at all, and the caller sees the envelope's own unknown-epoch error
- * rather than a network one.
- *
- * @param options {object}
- * @param options.remoteStore {WasRemoteStore}
- * @returns {EncryptionDescriptorSource}
- */
-export function remoteDescriptorSource({
-  remoteStore
-}: {
-  remoteStore: WasRemoteStore
-}): EncryptionDescriptorSource {
-  return {
-    async collectionEncryption({ collectionId }: { collectionId: string }) {
-      try {
-        return await remoteStore.readCollectionEncryption(collectionId)
-      } catch (err) {
-        log.warn('Descriptor refresh for a collection failed.', {
-          collectionId,
-          err
-        })
-        return undefined
-      }
     }
   }
 }

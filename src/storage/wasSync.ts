@@ -3,12 +3,12 @@
  */
 /**
  * Shared WAS replication bootstrap: given a parsed grant set and the invoking
- * ZcapClient, builds the delegated {@link WasRemoteStore}, reads each granted
- * collection's Metadata object once, best-effort marks each private collection
- * encrypted and declares each collection's equality indexes -- as the object's
- * plaintext `plaintext.indexes` member for a public one, inside its encrypted
- * `custom` envelope (as blinded-index attributes) for a private one -- and
- * starts the supplied {@link SyncController} with reactive store patching. The
+ * ZcapClient, builds the delegated {@link WasRemoteStore}, acquires each
+ * granted private collection's descriptor through the store's governed source,
+ * best-effort declares each collection's equality indexes -- as the Metadata
+ * object's plaintext `plaintext.indexes` member for a public one, inside its
+ * encrypted `custom` envelope (as blinded-index attributes) for a private one
+ * -- and starts the supplied {@link SyncController} with reactive store patching. The
  * caller injects the opened localStore, the controller, and the per-doc
  * `onRemoteChange` patcher (typically wired to the rehydrate mechanism over the
  * app's store registry) rather than this module reaching for app-side globals.
@@ -36,12 +36,10 @@ import {
   type WasCollectionConfig
 } from '../config.js'
 import type { ParsedGrants } from '../grants.js'
-import {
-  WasRemoteStore,
-  remoteDescriptorSource,
-  type CollectionMetaRead
-} from './wasRemoteStore.js'
+import { WasRemoteStore, type CollectionMetaRead } from './wasRemoteStore.js'
+import type { SpaceTrust } from './spaceTrust.js'
 import { SharedCollectionReader } from './sharedCollectionReader.js'
+import { acquireGovernedDescriptor } from './governedDescriptors.js'
 import type { LocalStore } from './localStore.js'
 import type { SyncController } from './syncController.js'
 import { log } from '../log.js'
@@ -68,8 +66,8 @@ export interface WasSyncBootstrap {
  *
  * `onCollection` is the bootstrap's hook: it runs per granted collection --
  * public ones included -- with the RAW object as read and the descriptor
- * (epoch-bearing or not) known for it, so the encryption declaration, the
- * public indexes declaration, and the cipher rebuild ride that one read. The
+ * (epoch-bearing or not) known for it, so the public indexes declaration, the
+ * blinded-index install, and the cipher rebuild ride that one read. The
  * blinded-index declaration and its schema install read the object again on
  * their own. Collections are processed concurrently, hook included, so one
  * slow collection never holds up the others.
@@ -121,26 +119,35 @@ async function readGrantedEncryption({
     granted.map(async collection => {
       const { id: collectionId } = collection
       const isPublic = isPublicCollection(collection)
-      // A descriptor the caller read seconds ago is reused as-is; only ids it
-      // did not cover (or a hot restore, which passes none) are read live. A
-      // public collection has no descriptor to know; its object is read only
-      // when it declares indexes, since the `plaintext` declaration on that
-      // object is the one thing wanted from it.
-      let encryption = isPublic ? undefined : knownDescriptors[collectionId]
+      // A private collection's descriptor is the verified head of its
+      // governing log, acquired through the store's log-governed source under
+      // `requireGoverned`, never the `encryption` projection the Metadata
+      // object serves; a descriptor the caller acquired seconds ago is reused
+      // as-is. The object itself is read only for the hook: a public
+      // collection declaring indexes wants the `plaintext` declaration
+      // baseline off it, a private one whose descriptor was not already known
+      // the `custom` envelope its blinded-index install reuses (otherwise the
+      // install reads it again on its own). A public collection has no
+      // descriptor.
+      const known = isPublic ? undefined : knownDescriptors[collectionId]
+      let encryption: CollectionEncryption | undefined
       let current: CollectionMetaRead | undefined
-      const wanted = isPublic
-        ? (collection.indexes?.length ?? 0) > 0
-        : encryption === undefined
-      if (wanted) {
-        try {
-          current = await remoteStore.readCollectionMeta(collectionId)
-        } catch (err) {
-          failures.push({ collection, err })
-          return
-        }
-        if (!isPublic) {
-          encryption = current?.description.encryption
-        }
+      const wanted =
+        onCollection !== undefined &&
+        (isPublic ? (collection.indexes?.length ?? 0) > 0 : known === undefined)
+      try {
+        ;[encryption, current] = await Promise.all([
+          !isPublic && known === undefined
+            ? acquireGovernedDescriptor({
+                source: remoteStore.descriptorSource,
+                collectionId
+              })
+            : known,
+          wanted ? remoteStore.readCollectionMeta(collectionId) : undefined
+        ])
+      } catch (err) {
+        failures.push({ collection, err })
+        return
       }
       if (encryption && hasKeyEpochs(encryption)) {
         descriptors[collectionId] = encryption
@@ -185,21 +192,28 @@ export type DescriptorReadOutcome = {
  * @param options.zcapClient {ZcapClient}   invocation signer = grants' controller
  * @param options.collections {WasCollectionConfig[]}   the collections to read
  *   descriptors for (public ones are skipped)
+ * @param [options.trust] {SpaceTrust}   the activation's Space trust state
+ *   (owner view, chain-head pins), shared with the sync bootstrap's store so
+ *   the owner is resolved once and the heads this read pins are what the
+ *   bootstrap's reads are checked against
  * @returns {Promise<DescriptorReadOutcome>}
  */
 export async function readRemoteDescriptors({
   parsed,
   zcapClient,
-  collections
+  collections,
+  trust
 }: {
   parsed: ParsedGrants
   zcapClient: ZcapClient
   collections: WasCollectionConfig[]
+  trust?: SpaceTrust
 }): Promise<DescriptorReadOutcome> {
   const remoteStore = WasRemoteStore.fromGrants({
     parsed,
     zcapClient,
-    collections
+    collections,
+    ...(trust && { trust })
   })
   // A public collection has no descriptor, and nothing else on its object is
   // wanted before replication exists: it is left to the bootstrap's pass.
@@ -244,6 +258,10 @@ export async function readRemoteDescriptors({
  *   instead of re-issuing the same GET seconds later. A hot restore passes
  *   none -- there the bootstrap read IS the freshness refresh over the
  *   offline cache
+ * @param [options.trust] {SpaceTrust}   the activation's Space trust state
+ *   (the one the login-time {@link readRemoteDescriptors} pass resolved the
+ *   owner into and pinned into), so every governed read of this session
+ *   checks one owner and one continuity
  * @returns {Promise<WasSyncBootstrap>}
  */
 export async function startWasSync({
@@ -257,7 +275,8 @@ export async function startWasSync({
   identityKeys,
   onAuthError,
   onDescriptorsFetched,
-  knownDescriptors = {}
+  knownDescriptors = {},
+  trust
 }: {
   parsed: ParsedGrants
   zcapClient: ZcapClient
@@ -278,6 +297,7 @@ export async function startWasSync({
     descriptors: Record<string, CollectionEncryption>
   ) => void | Promise<void>
   knownDescriptors?: Record<string, CollectionEncryption>
+  trust?: SpaceTrust
 }): Promise<WasSyncBootstrap> {
   const remoteStore = WasRemoteStore.fromGrants({
     parsed,
@@ -285,34 +305,32 @@ export async function startWasSync({
     collections,
     // The same identity keys that open a shared-collection reader also let the
     // client's EDV keystore build a codec, which the blinded-index verbs need.
-    ...(identityKeys && { keys: identityKeys })
+    ...(identityKeys && { keys: identityKeys }),
+    ...(trust && { trust })
   })
 
   // One pass per REGISTERED collection the grant set covers -- the registry is
   // what this app declared, so a granted id it never registered is none of this
-  // bootstrap's business. Each collection's Metadata object is READ ONCE (the
-  // pass above skips the read for a private collection whose descriptor the
-  // caller read moments ago, and for a public one declaring no indexes), and
-  // that one object feeds the declaration
-  // writes and the cipher rebuild below. A private collection with a blinding
-  // key costs extra reads of its own, described further down:
+  // bootstrap's business. Each private collection's descriptor is ACQUIRED
+  // ONCE through the governed source (skipped for one the caller acquired
+  // moments ago), and each collection's Metadata object is READ ONCE where the
+  // pass wants it (a public one declaring indexes, a private one whose
+  // descriptor was not known). Together they feed:
   //
-  // - the best-effort declaration writes, each a read-modify-write of the
-  //   object the pass read, since under WAS v0.5 the object is replaced whole
-  //   and a partial body would clear the members this app never touched. They
-  //   are non-fatal either way (envelopes replicate into an unmarked collection
-  //   just the same, and a query against undeclared indexes fails with a
-  //   descriptive 400). Each helper skips the collections it does not apply to
-  //   (reported ok + skipped): the encryption descriptor skips public
-  //   collections and ones already carrying a descriptor, the `plaintext`
-  //   indexes declaration skips private ones and public ones with no declared
-  //   indexes;
-  // - the private collection's encryption descriptor, read off the same
-  //   object: rebuild that collection's cipher when its epoch roster differs
-  //   from what the local store opened with (a wallet-side rotation, or
-  //   first-ever epochs), and hand the fresh set to the descriptor-cache
-  //   refresher so an offline session can rebuild its epoch-aware ciphers
-  //   without a live read.
+  // - the best-effort public `plaintext` indexes declaration, a
+  //   read-modify-write of the object the pass read, since under WAS v0.5 the
+  //   object is replaced whole and a partial body would clear the members
+  //   this app never touched. Non-fatal (a query against undeclared indexes
+  //   fails with a descriptive 400), and skipped (reported ok + skipped) for
+  //   a private collection or a public one with no declared indexes;
+  // - the private collection's cipher rebuild, when the acquired descriptor's
+  //   epoch roster differs from what the local store opened with (a
+  //   wallet-side rotation, or first-ever epochs), with the fresh set handed
+  //   to the descriptor-cache refresher so an offline session can rebuild its
+  //   epoch-aware ciphers without a live read.
+  //
+  // A private collection with a blinding key costs extra reads of its own,
+  // described further down.
   //
   // A private collection with a blinding key gets one more ride-along: the
   // object's `custom` envelope (RAW, the opaque form, not the decoded one) is
@@ -326,11 +344,8 @@ export async function startWasSync({
   // as it is, and the collection costs no second round trip. A known
   // descriptor skips the pass's read, so the install reads then too.
   //
-  // The two writes on a private collection contend on the object's one
-  // validator. The encryption descriptor lands first, and only on a
-  // collection carrying no descriptor at all -- which is also a collection
-  // with no blinding key, so nothing follows it. The blinded-index
-  // declaration reads the object fresh for its own compare-and-swap.
+  // The blinded-index declaration is the one write a private collection
+  // takes here, and it reads the object fresh for its own compare-and-swap.
   //
   // SHARED collections never appear here: they are wallet-owned, absent from
   // the app-owned registry, and a read-only grant would draw nothing but a
@@ -356,20 +371,6 @@ export async function startWasSync({
               'provisioner installs one.',
             { collectionId }
           )
-        }
-        // A collection already carrying a descriptor (read live, or known
-        // from the login-time read) is skipped inside the call: the bare
-        // descriptor must never overwrite a roster.
-        const declared = await remoteStore.markCollectionEncrypted(
-          collectionId,
-          { ...(current && { current }), ...(encryption && { encryption }) }
-        )
-        if (!declared.ok) {
-          log.warn('Encryption descriptor write not authorized.', {
-            collectionId,
-            status: declared.status ?? 'n/a',
-            error: declared.error ?? 'unknown error'
-          })
         }
         // The private-collection counterpart of the public `indexes`
         // declaration: the blinded-index schema lives in the object's
@@ -438,10 +439,10 @@ export async function startWasSync({
       { collectionId: collection.id, err }
     )
   }
-  // Install the encryption-descriptor source so a decrypt that meets an unseen
-  // epoch (a rotation on another device) re-reads the descriptor and rebuilds
-  // the cipher -- once per collection per session.
-  localStore.setDescriptorSource(remoteDescriptorSource({ remoteStore }))
+  // Install the store's log-governed descriptor source so a decrypt that meets
+  // an unseen epoch (a rotation elsewhere) re-reads the verified log head and
+  // rebuilds the cipher -- once per collection per session.
+  localStore.setDescriptorSource(remoteStore.descriptorSource)
   if (onDescriptorsFetched) {
     await onDescriptorsFetched(descriptors)
   }

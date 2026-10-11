@@ -115,7 +115,9 @@ beforeAll(async () => {
 
   // The collection is genuinely encrypted: it carries a key-epoch roster from
   // provisioning, and the cipher below seals every body under it.
-  const encryption = await remoteStore.readCollectionEncryption(PRIVATE_ID)
+  const encryption = await remoteStore.descriptorSource.collectionEncryption({
+    collectionId: PRIVATE_ID
+  })
   expect(encryption).toBeDefined()
   expect(hasKeyEpochs(encryption)).toBe(true)
   cipher = await createDocCipher({

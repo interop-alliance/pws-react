@@ -1,5 +1,58 @@
 # @interop/was-react Changelog
 
+## 0.28.0 - TBD
+
+### Changed
+
+- `resolveSpaceOwner` resolves the owner through wallet-core's
+  `discoverAccountLog` instead of its own fetch, parse, and resolve body; the
+  location check runs upstream.
+- `provisionDevGrants` promotes the Space controller through wallet-core's
+  `ensurePromotedSpaceController` under the configured Space name, so the
+  promotion reads first and heals an interrupted run.
+
+- **BREAKING**: every `edv` collection is read through a verifying descriptor
+  source under was-client's `requireGoverned` policy. `WasRemoteStore` gains
+  `descriptorSource`, wallet-core's `logGovernedDescriptorSource` over each
+  collection's `meta/log` (invoked with the collection's own grant), checked
+  against the Space owner's did:webvh account log. The owner is resolved from
+  the Space's world-readable `id/did.jsonl` (`resolveSpaceOwner`): the log is
+  fetched, resolved, and the resolved DID's log location is checked against the
+  URL it was served from. The login-time read, the sync bootstrap's install,
+  `LocalStore`'s unknown-epoch refresh, and `SharedCollectionReader` all acquire
+  through it; a descriptor is never taken from the Metadata object's
+  `encryption` projection any more. `remoteDescriptorSource` is removed from the
+  root entry. A collection with no governing log stays fail-closed. The Space
+  owner's verified view and the chain-head pins are held in memory for the
+  connected activation on one `SpaceTrust` the login-time read and the sync
+  bootstrap share (`fromGrants` takes it as `trust`), so the owner's log is
+  fetched and verified once per activation. A failed Space-owner resolution is
+  retried on the next read rather than remembered, and a shared collection whose
+  descriptor read fails surfaces that failure as itself instead of as
+  `SharedCollectionUnavailableError`.
+- was-client's `UnverifiedDescriptorError` (a source that does not verify the
+  governing log) surfaces as itself at every call site:
+  `SharedCollectionReader.open` rethrows it ahead of
+  `SharedCollectionUnavailableError`, and `LocalStore` surfaces it from the
+  decrypt that met it and every later one, instead of the envelope's
+  unknown-epoch error.
+- `provisionDevGrants` builds what a wallet's account genesis builds: a Space
+  promoted to a did:webvh owner whose log is published at `id/did.jsonl`, and
+  every private collection's epoch zero installed as the genesis of its
+  `meta/log` through the log-governed descriptor store. `provisionerDid` is now
+  the did:webvh. The server URL must be one did:webvh accepts (`https://`, or
+  `http://` on the literal host `localhost`). The Metadata-write probe leaves
+  `encryption` out of the body it writes back, since the server derives it from
+  the log head.
+- Remove `WasRemoteStore.readCollectionEncryption` (the Metadata object's
+  `encryption` projection is no longer read for a descriptor; `descriptorSource`
+  is the read) and `WasRemoteStore.markCollectionEncrypted` with the sync
+  bootstrap's `{ encryption: { scheme: 'edv' } }` declaration write. A
+  collection is declared encrypted by its governing log's genesis, and one with
+  no log stays fail-closed under the policy above, so the bare declaration had
+  nothing left to do.
+- Add `@interop/vh-resource-log` as a dependency.
+
 ## 0.27.0 - 2026-10-10
 
 ### Changed

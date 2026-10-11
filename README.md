@@ -206,6 +206,13 @@ failing; a collection this app is not a recipient of at all fails at open time
 with a `SharedCollectionUnavailableError`, and the session continues without
 that reader.
 
+Every encrypted collection, shared or app-owned, is read through a verifying
+descriptor source: the collection's `meta/log`, checked against the Space
+owner's did:webvh account log (published world-readable in the Space's `id`
+collection). A collection with no governing log stays unreadable, and a source
+that does not verify is refused with was-client's `UnverifiedDescriptorError`,
+surfaced as itself.
+
 #### Audiences
 
 An audience is one plaintext collection in another user's Space that this user
@@ -665,11 +672,14 @@ const result = await provisionDevGrants({
 // result.grants, result.spaceId, result.spaceUrl, result.appDid
 ```
 
-A throwaway "provisioner" identity owns the created Space (a genuine
-cross-identity delegation, as in the real wallet-to-requester flow), and a
-per-collection RW zcap is delegated to the app DID derived from `seed`. Pass
-`--probe` (or `probe: true`) to check whether the delegated zcap authorizes
-PUTting the EDV encryption descriptor.
+A throwaway "provisioner" identity owns the created Space, as a did:webvh whose
+account log is published in the Space's `id` collection (a genuine
+cross-identity delegation, as in the real wallet-to-requester flow), every
+private collection is log-governed from its first epoch, and a per-collection RW
+zcap is delegated to the app DID derived from `seed`. The server URL must be one
+did:webvh accepts: `https://`, or `http://` on the literal host `localhost`.
+Pass `--probe` (or `probe: true`) to check whether the delegated zcap authorizes
+PUTting the Collection Metadata object.
 
 ## Testing
 
