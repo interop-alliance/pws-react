@@ -683,10 +683,12 @@ A throwaway "provisioner" identity owns the created Space, as a did:webvh whose
 account log is published in the Space's `id` collection (a genuine
 cross-identity delegation, as in the real wallet-to-requester flow), every
 private collection is log-governed from its first epoch, and a per-collection RW
-zcap is delegated to the app DID derived from `seed`. The server URL must be one
-did:webvh accepts: `https://`, or `http://` on the literal host `localhost`.
-Pass `--probe` (or `probe: true`) to check whether the delegated zcap authorizes
-PUTting the Collection Metadata object.
+zcap is delegated to the app DID derived from `seed`. The grants live seven days
+(`DEV_GRANT_TTL_MS`); the `expires` option of the `provisionDevGrants` call sets
+another lifetime (the example CLI exposes no flag for it). The server URL must
+be one did:webvh accepts: `https://`, or `http://` on the literal host
+`localhost`. Pass `--probe` (or `probe: true`) to check whether the delegated
+zcap authorizes PUTting the Collection Metadata object.
 
 ## Testing
 

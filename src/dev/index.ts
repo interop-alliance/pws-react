@@ -9,5 +9,6 @@
 export {
   provisionDevGrants,
   DEFAULT_PROVISIONER_SEED,
+  DEV_GRANT_TTL_MS,
   type ProvisionDevGrantsResult
 } from './provisionDevGrants.js'

@@ -95,6 +95,19 @@ export function requireStore(): LocalStore {
 }
 
 /**
+ * The active session's opened replica, waiting out a replica swap in progress
+ * (the connect transition) first. The app-driven write verbs resolve the
+ * replica through this, so a write issued while the anonymous replica is
+ * being traded for the connected one lands in the connected one instead of
+ * rejecting.
+ *
+ * @returns {Promise<LocalStore>}
+ */
+export async function awaitStore(): Promise<LocalStore> {
+  return requireStorageContext().awaitStore()
+}
+
+/**
  * Whether the active session has a replica open.
  *
  * @returns {boolean}

@@ -53,6 +53,15 @@ export class StorageContext {
   #remoteStore: WasRemoteStore | null = null
   #generation = 0
   /**
+   * The replica swap in progress (a connect transition), if any: the writes
+   * that arrive while no replica is attached wait on it instead of throwing.
+   */
+  #swap: {
+    promise: Promise<LocalStore>
+    resolve: (store: LocalStore) => void
+    reject: (err: Error) => void
+  } | null = null
+  /**
    * Per-collection debounce timers coalescing a pull burst into one hydrate.
    */
   readonly #rehydrateTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -148,8 +157,70 @@ export class StorageContext {
     const store = this.#localStore
     this.#localStore = null
     this.#generation += 1
-    deactivateStorageContext(this)
+    // During a swap the pointer stays: the facades keep resolving this
+    // context, and its write verbs wait for the next attach (`awaitStore`)
+    // rather than throwing into a click handler mid-transition.
+    if (!this.#swap) {
+      deactivateStorageContext(this)
+    }
     return store
+  }
+
+  /**
+   * Opens a replica swap: from here until {@link endSwap}, a detach keeps the
+   * process-wide pointer and {@link awaitStore} waits for the replica the
+   * swap attaches instead of throwing. Idempotent while a swap is open.
+   *
+   * @returns {void}
+   */
+  beginSwap(): void {
+    if (this.#swap) {
+      return
+    }
+    let resolve!: (store: LocalStore) => void
+    let reject!: (err: Error) => void
+    const promise = new Promise<LocalStore>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    // A swap nobody awaits must not surface as an unhandled rejection.
+    promise.catch(() => {})
+    this.#swap = { promise, resolve, reject }
+  }
+
+  /**
+   * Closes the swap: the waiting writes run against the replica attached now,
+   * or reject with the no-replica error if the swap left none attached. A
+   * no-op outside a swap.
+   *
+   * @returns {void}
+   */
+  endSwap(): void {
+    const swap = this.#swap
+    if (!swap) {
+      return
+    }
+    this.#swap = null
+    try {
+      swap.resolve(this.requireStore())
+    } catch (err) {
+      swap.reject(err as Error)
+      deactivateStorageContext(this)
+    }
+  }
+
+  /**
+   * The attached replica, waiting out an open swap first (the swap resolves
+   * it once the new replica is attached and hydrated). Rejects, like
+   * {@link requireStore} throws, when none is attached and no swap is open.
+   *
+   * @returns {Promise<LocalStore>}
+   */
+  async awaitStore(): Promise<LocalStore> {
+    if (this.#swap) {
+      return this.#swap.promise
+    }
+    return this.requireStore()
   }
 
   /**

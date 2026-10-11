@@ -1,5 +1,36 @@
 # @interop/was-react Changelog
 
+## 0.29.0 - TBD
+
+### Changed
+
+- A write issued during the connect transition (`login` / `connectWithGrants`)
+  no longer rejects with "LocalStore is not initialized". The transition is a
+  replica swap on the `StorageContext` (`beginSwap` / `endSwap`): the
+  process-wide pointer stays with the session while the anonymous replica is
+  detached, and the entity-store write verbs resolve their replica through the
+  new `awaitStore`, which waits for the swap to attach and hydrate the connected
+  replica (or the re-opened anonymous one, on a failed activation) and then runs
+  the write there. `hydrate` still reads through `requireStore`. Only a merge
+  opens a swap; under `adopt: 'leave'` a mid-transition write still rejects, so
+  an edit of a set-aside document cannot resurrect it in the connected replica.
+- `login`'s connect epilogue now rides the serialized lifecycle chain (its
+  wallet popup await stays off it), and `connectWithGrants` is a no-op while a
+  login is in flight, so neither can swap the replica out from under the other
+  or under a `destroy`.
+- A failed connect surfaces its error from the caller (`login`,
+  `connectWithGrants`, `boot`) only, instead of once in the activation and once
+  more in `login`.
+- The connected activation runs its network half (the Space owner's log, the
+  collection logs, the descriptor reads) before the anonymous replica is
+  detached, so the swap holds only local work: collect, open, merge, hydrate. A
+  failed read rejects with the anonymous replica still attached and nothing to
+  undo.
+- `provisionDevGrants` takes an `expires` option and defaults it to
+  `DEV_GRANT_TTL_MS` (seven days, freewallet's write-grant lifetime; exported
+  from `./dev`). It passed none before, so ezcap minted five-minute grants and
+  the reconnect banner was raised right after a dev-connect.
+
 ## 0.28.0 - 2026-10-11
 
 ### Added

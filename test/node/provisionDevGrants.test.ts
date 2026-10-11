@@ -16,6 +16,7 @@ import { WasClient } from '@interop/was-client'
 import { webvhZcapClient } from '@interop/wallet-core/webvh'
 import {
   DEFAULT_PROVISIONER_SEED,
+  DEV_GRANT_TTL_MS,
   provisionDevGrants
 } from '../../src/dev/provisionDevGrants.js'
 
@@ -87,5 +88,31 @@ describe('provisionDevGrants', () => {
     })
     expect(description?.controller).toBe(provisioned.provisionerDid)
     expect(description?.name).toBe('Named Otherwise')
+  })
+
+  it("mints grants that live DEV_GRANT_TTL_MS, not ezcap's five minutes", async () => {
+    const before = Date.now()
+    const provisioned = await provisionDevGrants({
+      serverUrl: server!.serverUrl,
+      seed: SEED,
+      collections: ['notes']
+    })
+    const expires = Date.parse(provisioned.grants[0]!.expires!)
+    // ezcap serializes without milliseconds, hence the second of slack.
+    expect(expires).toBeGreaterThanOrEqual(before + DEV_GRANT_TTL_MS - 1000)
+    expect(expires).toBeLessThanOrEqual(Date.now() + DEV_GRANT_TTL_MS)
+  })
+
+  it('honors a caller-supplied expiry', async () => {
+    const expires = new Date(Date.now() + 60 * 60 * 1000)
+    const provisioned = await provisionDevGrants({
+      serverUrl: server!.serverUrl,
+      seed: SEED,
+      collections: ['notes'],
+      expires
+    })
+    expect(Date.parse(provisioned.grants[0]!.expires!)).toBe(
+      Math.floor(expires.getTime() / 1000) * 1000
+    )
   })
 })

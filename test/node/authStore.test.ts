@@ -50,6 +50,9 @@ import {
 } from '../../src/storage/wasSync.js'
 import { mintRecordEncryption } from '../../src/index.js'
 import { hasStore, requireStore } from '../../src/storage/storageManager.js'
+import { createEntityStore } from '../../src/storage/entityStore.js'
+import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
+import type { RxStorage } from 'rxdb/plugins/core'
 import {
   LocalStore,
   dbNameForController
@@ -179,6 +182,96 @@ function noteGrants(): IZcap[] {
       invocationTarget: 'http://localhost:3999/space/space-1/notes'
     }
   ] as unknown as IZcap[]
+}
+
+/**
+ * Wraps a storage (the real Dexie one by default) so the first open of a
+ * database `match` accepts parks on a gate. `entered` resolves once an open is
+ * parked; `release()` lets it proceed, `fail(err)` makes it throw instead.
+ * Every other open passes straight through. The wrapper is built over the
+ * base's prototype, so every other storage method stays intact.
+ */
+function gatedStorage({
+  match,
+  base = getRxStorageDexie() as unknown as RxStorage<unknown, unknown>
+}: {
+  match: (databaseName: string) => boolean
+  base?: RxStorage<unknown, unknown>
+}): {
+  storage: RxStorage<unknown, unknown>
+  entered: Promise<void>
+  release: () => void
+  fail: (err: Error) => void
+} {
+  let hold = true
+  let markEntered!: () => void
+  const entered = new Promise<void>(resolve => (markEntered = resolve))
+  let release!: () => void
+  let fail!: (err: Error) => void
+  const gate = new Promise<void>((resolve, reject) => {
+    release = resolve
+    fail = reject
+  })
+  const createStorageInstance = async (
+    params: Parameters<typeof base.createStorageInstance>[0]
+  ): ReturnType<typeof base.createStorageInstance> => {
+    if (hold && match(params.databaseName)) {
+      hold = false
+      markEntered()
+      await gate
+    }
+    return base.createStorageInstance(params)
+  }
+  const storage = Object.assign(Object.create(base) as typeof base, {
+    createStorageInstance
+  })
+  return { storage, entered, release, fail }
+}
+
+/**
+ * Boots a store over a gated storage and parks the connected replica's open
+ * under `seed`, so the anonymous replica is detached and nothing is attached
+ * in its place when the gate is entered (the window a mid-swap write lands
+ * in). Resolves once the open is parked, with the write-side handles.
+ */
+async function enterSwap({
+  config,
+  seed,
+  gate,
+  storage = gate.storage
+}: {
+  config: WasAppConfig
+  seed: Uint8Array
+  gate: ReturnType<typeof gatedStorage>
+  storage?: RxStorage<unknown, unknown>
+}): Promise<{
+  store: WasAuthStore
+  anonDid: string
+  connecting: Promise<void>
+}> {
+  const store = createAuthStore({
+    config,
+    registry,
+    seedStore: newSeedStore(),
+    storage
+  })
+  liveStores.push(store)
+  await store.getState().boot()
+  const anonDid = store.getState().controllerDid!
+  const connecting = store
+    .getState()
+    .connectWithGrants({ seed, grants: noteGrants() })
+  await gate.entered
+  expect(hasStore()).toBe(false)
+  return { store, anonDid, connecting }
+}
+
+async function connectedDbFor(
+  config: WasAppConfig,
+  seed: Uint8Array
+): Promise<string> {
+  const { controllerDid } = await deriveIdentity({ seed })
+  return dbNameForController({ dbName: config.dbName!, controllerDid })
 }
 
 // Track created stores so their expiry-watch intervals never outlive a test.
@@ -371,6 +464,139 @@ describe('boot()', () => {
 })
 
 describe('connectWithGrants()', () => {
+  it('a write issued during the replica swap waits and lands in the connected replica', async () => {
+    const config = baseConfig()
+    const seed = await provisionedSeed()
+    const connectedDb = await connectedDbFor(config, seed)
+    const gate = gatedStorage({ match: name => name === connectedDb })
+    const { store, connecting } = await enterSwap({ config, seed, gate })
+    const notes = createEntityStore<{ id: string; title: string }>('notes')
+
+    // The write cannot settle before the swap closes, and the swap closes
+    // (synchronously followed by the `connected` write) only once the parked
+    // open is released: the status the write's continuation observes is the
+    // proof of its ordering.
+    const doc = { id: crypto.randomUUID(), title: 'mid-swap' }
+    const writing = notes
+      .getState()
+      .insert(doc)
+      .then(() => store.getState().status)
+
+    gate.release()
+    await connecting
+    expect(await writing).toBe('connected')
+    const { controllerDid } = await deriveIdentity({ seed })
+    expect(store.getState().controllerDid).toBe(controllerDid)
+    const rows = await requireStore().listEntities<{ id: string }>('notes')
+    expect(rows.map(row => row.id)).toContain(doc.id)
+    expect(notes.getState().byId.has(doc.id)).toBe(true)
+  })
+
+  it('a write issued during a failed activation lands in the re-opened anonymous replica', async () => {
+    const config = baseConfig()
+    const seed = await provisionedSeed()
+    const connectedDb = await connectedDbFor(config, seed)
+    const gate = gatedStorage({ match: name => name === connectedDb })
+    const { store, anonDid, connecting } = await enterSwap({
+      config,
+      seed,
+      gate
+    })
+    const notes = createEntityStore<{ id: string; title: string }>('notes')
+    const doc = { id: crypto.randomUUID(), title: 'mid-swap' }
+    const writing = notes
+      .getState()
+      .insert(doc)
+      .then(() => store.getState().status)
+
+    gate.fail(new Error('connected open boom'))
+    await expect(connecting).rejects.toThrow('connected open boom')
+    expect(await writing).toBe('local')
+    expect(store.getState().controllerDid).toBe(anonDid)
+    expect(store.getState().error).toMatch(/connected open boom/)
+    const rows = await requireStore().listEntities<{ id: string }>('notes')
+    expect(rows.map(row => row.id)).toContain(doc.id)
+  })
+
+  it('a write issued during a swap that leaves no replica rejects, and the pointer is released', async () => {
+    const config = baseConfig()
+    const seed = await provisionedSeed()
+    const connectedDb = await connectedDbFor(config, seed)
+    // The anonymous database's name is only known after boot; the second
+    // gate matches it once set, so the boot-time open passes through and the
+    // fallback re-open is the one that fails.
+    let anonDb: string | null = null
+    const connectedGate = gatedStorage({ match: name => name === connectedDb })
+    const anonGate = gatedStorage({
+      match: name => name === anonDb,
+      base: connectedGate.storage
+    })
+    const { store, anonDid, connecting } = await enterSwap({
+      config,
+      seed,
+      gate: connectedGate,
+      storage: anonGate.storage
+    })
+    anonDb = dbNameForController({
+      dbName: config.dbName!,
+      controllerDid: anonDid
+    })
+    const notes = createEntityStore<{ id: string; title: string }>('notes')
+    // Both rejections are observed later; keep them handled meanwhile.
+    const connected = connecting.catch((err: Error) => err)
+    const written = notes
+      .getState()
+      .insert({ id: crypto.randomUUID(), title: 'mid-swap' })
+      .catch((err: Error) => err)
+
+    connectedGate.fail(new Error('connected open boom'))
+    await anonGate.entered
+    anonGate.fail(new Error('anon re-open boom'))
+    expect(await connected).toMatchObject({ message: 'connected open boom' })
+    expect(await written).toMatchObject({
+      message: expect.stringMatching(/LocalStore is not initialized/)
+    })
+    expect(hasStore()).toBe(false)
+    expect(() => requireStore()).toThrow()
+    expect(store.getState().error).toMatch(/connected open boom/)
+    // `destroy` must not trip over the store the swap never attached.
+    anonGate.release()
+  })
+
+  it("under adopt: 'leave' a mid-transition write rejects instead of following the set-aside data", async () => {
+    const config = baseConfig()
+    const seed = await provisionedSeed()
+    const connectedDb = await connectedDbFor(config, seed)
+    const gate = gatedStorage({ match: name => name === connectedDb })
+    const store = createAuthStore({
+      config,
+      registry,
+      seedStore: newSeedStore(),
+      storage: gate.storage
+    })
+    liveStores.push(store)
+    await store.getState().boot()
+    const notes = createEntityStore<{ id: string; title: string }>('notes')
+    const kept = { id: crypto.randomUUID(), title: 'set aside' }
+    await notes.getState().insert(kept)
+
+    const connecting = store
+      .getState()
+      .connectWithGrants({ seed, grants: noteGrants(), adopt: 'leave' })
+    await gate.entered
+    // No swap is open, so the write meets the bare no-replica error (the
+    // activation has re-claimed the pointer ahead of its parked open).
+    await expect(
+      notes.getState().update({ ...kept, title: 'edited mid-swap' })
+    ).rejects.toThrow(/LocalStore is not initialized/)
+
+    gate.release()
+    await connecting
+    expect(store.getState().status).toBe('connected')
+    const rows = await requireStore().listEntities<{ id: string }>('notes')
+    expect(rows.map(row => row.id)).not.toContain(kept.id)
+  })
+
   it('transitions local to connected under the given seed', async () => {
     const store = makeStore(baseConfig(), newSeedStore())
     await store.getState().boot()
@@ -594,8 +820,10 @@ describe('adoption', () => {
       /encryption descriptor of collection "notes"/
     )
 
-    // Back on the anonymous replica, with nothing adopted and nothing lost.
+    // Back on the anonymous replica, with nothing adopted and nothing lost:
+    // the read fails ahead of the swap, so the replica was never detached.
     expect(store.getState().status).toBe('local')
+    expect(hasStore()).toBe(true)
     expect(store.getState().controllerDid).toBe(anonDid)
     expect(store.getState().error).toMatch(/encryption descriptor/)
     expect(

@@ -223,6 +223,32 @@ session. That closes the keyed-remount window, where the new store had skipped
 its creation-time claim and the old context would otherwise have kept answering
 the entity-store verbs after its own teardown.
 
+The one detach that keeps the pointer is the connect transition's replica swap
+(`StorageContext.beginSwap` / `endSwap`, opened by `completeConnect`). The
+session is not retiring, it is trading its anonymous replica for the connected
+one, and an app write that arrives in between (a click landing while
+`connectWithGrants` runs at mount) must not reject. The entity-store write verbs
+resolve their replica through `awaitStore`, which waits for the swap to end: the
+swap ends after the new replica is attached, merged, and hydrated, so the queued
+write lands in the connected replica and after the adoption merge (or in the
+re-opened anonymous replica when the activation failed). The activation's
+network half (owner log, collection logs, descriptor reads) runs before the swap
+opens, so the swap holds only local work. Library-driven reads (`hydrate`) stay
+on `requireStore`: they run inside the swap and must not wait on it.
+
+Only a merge opens a swap. Under `adopt: 'leave'` the anonymous data is set
+aside, and a write composed against it must not follow it over: an update of a
+set-aside document would find no envelope in the connected replica and be
+resurrected there as a create. A write that arrives mid-transition under `leave`
+rejects, as every such write did before the swap existed.
+
+The swap is serialized with the rest of the lifecycle. `login` keeps its wallet
+popup await off the lifecycle chain, but its connect epilogue (the swap) rides
+the chain once the popup has answered, so a `destroy` or a `connectWithGrants`
+queued meanwhile runs to completion first rather than tearing the swap apart.
+`connectWithGrants` is a no-op while a Login With Wallet flow is in flight
+(`phase` is non-null), for the mirror case.
+
 ### `writerId`
 
 The per-install LWW attribution label, resolved once at store creation from

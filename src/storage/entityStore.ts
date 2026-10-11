@@ -25,7 +25,12 @@ import { create, type UseBoundStore, type StoreApi } from 'zustand'
 // The verbs resolve the ACTIVE session's context on every call rather than
 // capturing one: an entity store is created at module level, before any
 // session exists, and outlives every session it serves.
-import { requireStore, requireRemoteStore, stampLww } from './storageManager.js'
+import {
+  awaitStore,
+  requireStore,
+  requireRemoteStore,
+  stampLww
+} from './storageManager.js'
 import { remotePayloadWins } from '@interop/social-core'
 import { lwwFields } from '@interop/was-sync'
 
@@ -221,22 +226,26 @@ export function createEntityStore<T extends { id: string }>(
       insert: async doc => {
         // Stamp once, then persist and commit the SAME object, so the
         // optimistic Map entry is byte-for-byte what the replica holds.
+        const local = await awaitStore()
         const stamped = stampLww(doc) as unknown as T
-        await requireStore().insertEntity(collectionKey, stamped)
+        await local.insertEntity(collectionKey, stamped)
         commitDoc(stamped)
       },
       update: async doc => {
+        const local = await awaitStore()
         const stamped = stampLww(doc) as unknown as T
-        await requireStore().updateEntity(collectionKey, stamped)
+        await local.updateEntity(collectionKey, stamped)
         commitDoc(stamped)
       },
       upsert: async doc => {
+        const local = await awaitStore()
         const stamped = stampLww(doc) as unknown as T
-        await requireStore().upsertEntity(collectionKey, stamped)
+        await local.upsertEntity(collectionKey, stamped)
         commitDoc(stamped)
       },
       remove: async uuid => {
-        await requireStore().deleteEntity(collectionKey, uuid)
+        const local = await awaitStore()
+        await local.deleteEntity(collectionKey, uuid)
         dropDoc(uuid)
       },
       replaceAll: docs => {

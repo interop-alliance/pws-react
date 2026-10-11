@@ -103,6 +103,16 @@ import { log } from '../log.js'
 export type SessionStatus = 'boot' | 'local' | 'connected' | 'reconnect'
 
 /**
+ * The network half of a connected activation (see `prepareActivation`): the
+ * Space trust state and the descriptors the connected replica opens with.
+ */
+interface PreparedActivation {
+  trust: SpaceTrust
+  descriptors?: Record<string, CollectionEncryption>
+  fresh: Record<string, CollectionEncryption>
+}
+
+/**
  * What adoption carries from the anonymous replica into the connected one: the
  * decrypted payloads per collection key, plus the anonymous controller DID
  * (whose per-controller database is deleted once the merge lands).
@@ -383,9 +393,10 @@ export function createAuthStore({
   // see its comment), and so do `logout` and `clearLocalData` -- user-driven,
   // but they tear down and re-open the process-wide holder, so overlapping an
   // in-flight boot's bring-up would race two open/teardown sequences (see the
-  // comment at `logout`). `login` and `reconnect` stay off it: they are
-  // guarded by their own flags, and both await the CHAPI popup -- chaining
-  // them would hold boots and destroys hostage to user interaction.
+  // comment at `logout`). `login` and `reconnect` keep their CHAPI popup
+  // await off it: chaining that would hold boots and destroys hostage to
+  // user interaction. `login`'s connect epilogue (the replica swap) rides
+  // the chain once the popup has answered.
   let lifecycle: Promise<void> = Promise.resolve()
   function serializeLifecycle<T>(task: () => Promise<T>): Promise<T> {
     const run = lifecycle.then(task, task)
@@ -697,15 +708,59 @@ export function createAuthStore({
   }
 
   /**
+   * The network half of a connected activation, run BEFORE any replica is
+   * touched: one Space trust state for the whole activation (the login-time
+   * descriptor read and the sync bootstrap build separate remote stores, and
+   * the second must verify against the owner the first resolved and continue
+   * the heads the first pinned), and the encryption descriptors the connected
+   * replica opens epoch-aware with. The cached descriptors let an offline hot
+   * restore decrypt multi-recipient envelopes with no live description read,
+   * while a first login (no cache yet) completes the set with live reads. A
+   * read that fails rejects a login (the adoption merge would write over a
+   * guess) but only degrades a restore, which adopts nothing: a reload while
+   * offline must not drop a connected user into `local`.
+   *
+   * Kept apart from the replica swap so the owner-log and collection-log
+   * round trips run while the anonymous replica is still attached and
+   * writable; only the local work (collect, open, merge, hydrate) sits in the
+   * swap.
+   *
+   * @param session {object}   the connecting identity and its parsed grants
+   * @param [session.restore] {boolean}   a hot restore rather than a login: a
+   *   descriptor read that fails degrades that collection instead of rejecting
+   * @returns {Promise<PreparedActivation>}
+   */
+  async function prepareActivation(session: {
+    identity: IdentityAgents
+    parsed: ParsedGrants
+    restore?: boolean
+  }): Promise<PreparedActivation> {
+    const trust = createSpaceTrust(session.parsed)
+    const { descriptors, fresh } = await descriptorManager.completeDescriptors({
+      cached: await descriptorManager.loadCachedDescriptors({
+        controllerDid: session.identity.controllerDid
+      }),
+      identity: session.identity,
+      parsed: session.parsed,
+      onReadFailure: session.restore ? 'skip' : 'reject',
+      trust
+    })
+    return { trust, descriptors, fresh }
+  }
+
+  /**
    * Opens the connected replica under the session seed, hydrates, persists the
    * session, and starts sync. On any failure the store is torn back down and the
    * anonymous local replica re-opened (so the app never dead-ends), then the
-   * error is surfaced and rethrown for the caller to finalize.
+   * error is rethrown for the caller to surface and finalize.
    *
    * @param session {object}   the session to open: its seed, identity, parsed
    *   grants and expiry, plus the payloads to adopt (merge logins only)
    * @param [session.restore] {boolean}   a hot restore rather than a login: a
    *   descriptor read that fails degrades that collection instead of rejecting
+   * @param [session.prepared] {PreparedActivation}   the network half, when
+   *   the caller already ran it (the connect transition runs it ahead of the
+   *   replica swap); a restore runs it here
    * @returns {Promise<void>}
    */
   async function activateConnected(session: {
@@ -716,30 +771,11 @@ export function createAuthStore({
     expires: string
     adopt?: AdoptSource
     restore?: boolean
+    prepared?: PreparedActivation
   }): Promise<void> {
-    // One Space trust state for the whole activation: the login-time
-    // descriptor read and the sync bootstrap build separate remote stores,
-    // and the second must verify against the owner the first resolved and
-    // continue the heads the first pinned.
-    const trust = createSpaceTrust(session.parsed)
     try {
-      // Load the cached encryption descriptors so the connected replica opens
-      // epoch-aware: an offline hot restore then decrypts multi-recipient
-      // envelopes with no live description read, while a first login (no cache
-      // yet) completes the set with live reads before the replica opens. A
-      // read that fails rejects a login (the adoption merge would write over
-      // a guess) but only degrades a restore, which adopts nothing: a reload
-      // while offline must not drop a connected user into `local`.
-      const { descriptors, fresh } =
-        await descriptorManager.completeDescriptors({
-          cached: await descriptorManager.loadCachedDescriptors({
-            controllerDid: session.identity.controllerDid
-          }),
-          identity: session.identity,
-          parsed: session.parsed,
-          onReadFailure: session.restore ? 'skip' : 'reject',
-          trust
-        })
+      const { trust, descriptors, fresh } =
+        session.prepared ?? (await prepareActivation(session))
       await openAndHydrate({
         identity: session.identity,
         ...(session.adopt && { adopt: session.adopt }),
@@ -767,7 +803,6 @@ export function createAuthStore({
           { err: localErr }
         )
       }
-      store.setState({ error: errorMessage(err) })
       throw err
     }
   }
@@ -1047,15 +1082,35 @@ export function createAuthStore({
     adopt: 'merge' | 'leave'
     snapshot: { status: SessionStatus; controllerDid: string | null }
   }): Promise<void> {
-    const source = await detachAndCollect(adopt, snapshot)
-    await activateConnected({
-      seed,
-      identity,
-      parsed,
-      grants,
-      expires,
-      ...(source && { adopt: source })
-    })
+    // The network half first, with the anonymous replica still attached: a
+    // failed owner-log or descriptor read rejects here with nothing to undo.
+    const prepared = await prepareActivation({ identity, parsed })
+    // The replica swap: writes that arrive while no replica is attached wait
+    // on it and land in the connected replica (or, on a failed activation, in
+    // the re-opened anonymous one) once it is attached and hydrated. Only a
+    // merge opens one. Under `leave` the anonymous data is set aside, and a
+    // write composed against it must not follow it over: an `update` of a
+    // set-aside doc would find no envelope in the connected replica and
+    // resurrect it there as a create. Those writes reject instead, as every
+    // mid-transition write did before the swap existed.
+    if (adopt === 'merge') {
+      storageContext.beginSwap()
+    }
+    let source: AdoptSource | null
+    try {
+      source = await detachAndCollect(adopt, snapshot)
+      await activateConnected({
+        seed,
+        identity,
+        parsed,
+        grants,
+        expires,
+        prepared,
+        ...(source && { adopt: source })
+      })
+    } finally {
+      storageContext.endSwap()
+    }
     store.setState({
       status: 'connected',
       controllerDid: identity.controllerDid,
@@ -1112,8 +1167,12 @@ export function createAuthStore({
         })
       } catch (err) {
         log.warn('Session boot failed', { err })
-        // `activateConnected` already re-opens local on its own failure; only
-        // open local here for an earlier failure that never reached it.
+        // `activateConnected` already re-opens local on its own failure (and
+        // `openLocal` has written `local` then); surface the error over that,
+        // and only open local here for a failure that never reached it.
+        if (get().status !== 'boot') {
+          set({ error: errorMessage(err) })
+        }
         if (get().status === 'boot') {
           try {
             await openLocal()
@@ -1181,16 +1240,22 @@ export function createAuthStore({
           })
           // The wallet succeeded: run the shared connect epilogue (a cancel
           // above leaves `local` intact, and a failure inside it still falls
-          // back to an intact `local` -- see `completeConnect`).
-          await completeConnect({
-            seed: outcome.seed,
-            identity: outcome.identity,
-            parsed: outcome.parsed,
-            grants: outcome.grants,
-            expires: outcome.expires,
-            adopt,
-            snapshot: preLogin
-          })
+          // back to an intact `local` -- see `completeConnect`). The popup
+          // await above stays off the lifecycle chain; the epilogue rides it,
+          // since it swaps the process-wide holder and awaits no user
+          // interaction. A `connectWithGrants` or a `destroy` queued meanwhile
+          // runs to completion first instead of tearing the swap apart.
+          await serializeLifecycle(() =>
+            completeConnect({
+              seed: outcome.seed,
+              identity: outcome.identity,
+              parsed: outcome.parsed,
+              grants: outcome.grants,
+              expires: outcome.expires,
+              adopt,
+              snapshot: preLogin
+            })
+          )
           return { firstRun: outcome.firstRun }
         } catch (err) {
           // A cancel is not a failure: clear the in-flight flags without leaving a
@@ -1221,29 +1286,37 @@ export function createAuthStore({
         // not stall a queued destroy, and being user-driven it never runs as
         // part of the mount race. The connected guard makes a double-fired
         // connect (dev-mode double effects again) a no-op instead of a
-        // re-activation.
+        // re-activation, and the phase guard keeps it off a Login With
+        // Wallet flow in flight: that login's popup await is off the chain,
+        // so without the guard this connect would land first and the login's
+        // epilogue would then swap out the replica it just opened.
         await serializeLifecycle(async () => {
-          if (get().status === 'connected') {
+          if (get().status === 'connected' || get().phase !== null) {
             return
           }
           const preConnect = {
             status: get().status,
             controllerDid: get().controllerDid
           }
-          const identity = await deriveIdentity({ seed })
-          const parsed = parseGrants(grants)
-          const expires =
-            earliestExpiry(grants) ??
-            new Date(Date.now() + NO_EXPIRY_MS).toISOString()
-          await completeConnect({
-            seed,
-            identity,
-            parsed,
-            grants,
-            expires,
-            adopt,
-            snapshot: preConnect
-          })
+          try {
+            const identity = await deriveIdentity({ seed })
+            const parsed = parseGrants(grants)
+            const expires =
+              earliestExpiry(grants) ??
+              new Date(Date.now() + NO_EXPIRY_MS).toISOString()
+            await completeConnect({
+              seed,
+              identity,
+              parsed,
+              grants,
+              expires,
+              adopt,
+              snapshot: preConnect
+            })
+          } catch (err) {
+            set({ error: errorMessage(err) })
+            throw err
+          }
         })
       },
 

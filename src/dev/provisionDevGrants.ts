@@ -94,6 +94,12 @@ export const DEFAULT_PROVISIONER_SEED: Uint8Array = new Uint8Array([
 ])
 
 /**
+ * How long a dev grant lives: seven days, the lifetime freewallet gives a
+ * requester's write grant. A dev re-provisions when it lapses.
+ */
+export const DEV_GRANT_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
  * The outcome of a provisioning run: the signed grants plus the topology and
  * identities they were minted against. The JSON written to `outFile` (when
  * given) is `{ grants }`.
@@ -161,6 +167,9 @@ export interface ProvisionDevGrantsResult {
  *   agent; does not affect the derived DID
  * @param [options.actions] {ActionInput[]}   the RW action set delegated per
  *   collection (defaults to the auth layer's `RW_ACTIONS`)
+ * @param [options.expires] {string | Date}   when the delegated grants expire
+ *   (defaults to `DEV_GRANT_TTL_MS` from now; left unset, ezcap would mint
+ *   five-minute grants, too short to dev against)
  * @param [options.probe] {boolean}   when true, probe whether the delegated RW
  *   zcap authorizes a PUT of the Collection Metadata object (read first and
  *   written back verbatim, so an installed epoch roster is never clobbered)
@@ -179,6 +188,7 @@ export async function provisionDevGrants({
   // The server accepts HEAD even though storage-core's ActionInput union omits
   // it, hence the assertion.
   actions = RW_ACTIONS as ActionInput[],
+  expires = new Date(Date.now() + DEV_GRANT_TTL_MS),
   probe = false,
   log = () => {}
 }: {
@@ -197,6 +207,7 @@ export async function provisionDevGrants({
   provisionerSeed?: Uint8Array
   identityHandle?: string
   actions?: ActionInput[]
+  expires?: string | Date
   probe?: boolean
   log?: (message: string) => void
 }): Promise<ProvisionDevGrantsResult> {
@@ -355,6 +366,7 @@ export async function provisionDevGrants({
       const zcap = await owner.grant({
         to: appDid,
         actions,
+        expires,
         target: toUrl({ serverUrl, path: collectionPath(spaceId, id) }),
         capability: spaceRoot
       })
