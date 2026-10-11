@@ -683,11 +683,12 @@ inside `start()` and resets the status store on stop.
 Every replica collection is declared on `@interop/was-sync`'s
 `syncedDocSchema()`: a row is `{ id, updatedAt, data }` plus the optional
 members the server stamps on it (`updatedAtCounter`, `originId`, the nested
-`meta` stamp, `createdBy`, `epoch`, the `etag` / `metaEtag` validators, and
-`custom`). The schema is stored state. RxDB refuses to open a collection whose
-stored schema hash differs from the declared one, and the schema ships with no
-migration strategy, so a replica created under an earlier shape is not migrated:
-`clearLocalData()` removes it and the next login re-pulls from the server.
+`meta` stamp, `createdBy`, `writerId`, `epoch`, the `etag` / `metaEtag`
+validators, and `custom`). The schema is stored state. RxDB refuses to open a
+collection whose stored schema hash differs from the declared one, and the
+schema ships with no migration strategy, so a replica created under an earlier
+shape is not migrated: `clearLocalData()` removes it and the next login re-pulls
+from the server.
 
 Each collection's RxDB conflict handler (installed at `addCollections` in
 `LocalStore.init`) settles a 412 push conflict by decrypting both sides and

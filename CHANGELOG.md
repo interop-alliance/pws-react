@@ -52,6 +52,16 @@
   no log stays fail-closed under the policy above, so the bare declaration had
   nothing left to do.
 - Add `@interop/vh-resource-log` as a dependency.
+- Bump `@interop/was-sync` to 0.9.0 and `@interop/was-client` to 0.94.0. The
+  ack write-back now stamps a pushed row's `updatedAt`, `updatedAtCounter`,
+  `originId`, `createdBy`, and `meta` from the write response itself, so a row
+  this replica created no longer depends on the feed echo for its server stamp
+  (needs a server answering `201` / `200` with a body, was-teaching-server
+  0.42.0 or later). The replica schema also gains an optional row-level
+  `writerId` at the same schema version, so RxDB refuses to reopen an existing
+  replica: as with 0.27.0, every remembered browser clears its local data and
+  logs in again once, and local writes not yet pushed are lost with the old
+  replica. Nothing in this library reads the push ack, so no code changed.
 
 ## 0.27.0 - 2026-10-10
 
