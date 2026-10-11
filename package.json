@@ -1,7 +1,7 @@
 {
   "name": "@interop/was-react",
   "description": "React library for building 'Bring Your Own Everything' (BYOE) apps on Wallet Attached Storage: DID Auth login via CHAPI wallet, local-first encrypted storage, and background sync to a WAS server.",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "type": "module",
   "scripts": {
     "build": "pnpm run clear && tsc",
