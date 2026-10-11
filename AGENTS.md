@@ -73,15 +73,32 @@ mint the descriptor a fresh encrypted collection requires.
 
 ### Peer-dependency policy
 
-`react`, `zustand`, and `rxdb` are required peers. `@mui/material`,
+`react` and `zustand` are required peers. `@mui/material`,
 `@mui/icons-material`, and `react-router` are OPTIONAL peers
 (`peerDependenciesMeta`), imported only under `src/mui/`. Do not add a runtime
 dependency that an app could reasonably own; prefer a peer.
 
-`@interop/was-sync` (the WAS replication driver) is an ordinary dependency
-rather than a peer, because `LocalStore` is value-exported from the root entry
-and so `rxdb` is not yet droppable. WR-44 owns that split, and the two become
-optional peers with it.
+`rxdb` is an OPTIONAL peer too, with a different rule: the root entry may
+reference it, but only through a dynamic `import()` on an async path. Today
+those sites are `LocalStore.init` / `LocalStore.removeDatabase` (the two `rxdb`
+entry points) and `SyncController.start` (`@interop/was-sync/rxdb`, the one
+was-sync entry that imports `rxdb`). Type-only imports from `rxdb` are fine
+inside a module, but must not reach an exported signature: the published
+declarations name no `rxdb` type, so a replica-less consumer type-checks without
+`skipLibCheck`. Use `ReplicaStorage` / `ReplicaChange`
+(`src/storage/localStore.ts`) on public surfaces, or mark the member `@internal`
+(the build sets `stripInternal`). A static value import from `rxdb` or from
+`@interop/was-sync/rxdb` reachable from `src/index.ts` would make a replica-less
+app fail to resolve the root; `pnpm run test:dist` greps `dist` for one (and the
+`.d.ts` files for any import of either), and
+`test/node/replicaLessInstall.test.ts` resolves the root under a resolver where
+every `rxdb` entry throws.
+
+`@interop/was-sync` (the WAS replication driver) stays an ordinary dependency.
+Its root entry is `rxdb`-free, and the root entry here value-imports it
+unconditionally (the logger forwarding in `src/log.ts`, `lwwFields`, and the
+`writerId` mint), none of which is replica-bound, so an optional peer would only
+make every app declare a package this library needs regardless.
 
 ### Pinned derivation warning (wire/data contract -- never change)
 

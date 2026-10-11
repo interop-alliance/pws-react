@@ -692,6 +692,30 @@ uncovered collection never draws a fail-closed 403 that reads as expired access.
 `stop()` is terminal for a core instance, so the binding builds a fresh core
 inside `start()` and resets the status store on stop.
 
+`rxdb` is an optional peer, and the root entry stays resolvable without it.
+Nothing reachable from `src/index.ts` imports `rxdb` at module evaluation:
+`LocalStore` loads `rxdb/plugins/core` and `rxdb/plugins/storage-dexie` inside
+`init()` and `removeDatabase()` (the default Dexie storage is loaded only when
+the caller supplies none), and `SyncController` loads `@interop/was-sync/rxdb`,
+the one was-sync entry that imports `rxdb`, inside `start()`. A replica-less app
+(login plus shared-collection reads, no `WasSessionProvider`) therefore installs
+without `rxdb`, and an app that replicates adds the peer explicitly; a missing
+peer surfaces at the first replica operation with the resolver's own error.
+Under Vite a declared optional peer that is not installed resolves to a stub
+that throws only when evaluated, which is what makes the lazy site the failure
+point rather than the import of this package. The core's `isAuthError` predicate
+is not re-exported from the root for the same reason; it is imported from
+`@interop/was-sync/rxdb`. The published declarations name no `rxdb` type either,
+so that consumer type-checks the root without `skipLibCheck`: the `storage`
+injection option (`LocalStore.init`, `removeDatabase`, `createAuthStore`,
+`executeLocalWipe`) is typed as `ReplicaStorage`, the structural shape of RxDB's
+`RxStorage` the library passes through, narrowed back at the two call sites;
+`onRemoteChange` callbacks receive a `ReplicaChange` (`operation` plus
+`documentData`, the two members the per-doc patch reads, which every RxDB change
+event satisfies); and `LocalStore.rxCollection`, whose type is RxDB's, is
+`@internal` and stripped from the declarations (`stripInternal`), staying
+available to the sync controller and the tests.
+
 Every replica collection is declared on `@interop/was-sync`'s
 `syncedDocSchema()`: a row is `{ id, updatedAt, data }` plus the optional
 members the server stamps on it (`updatedAtCounter`, `originId`, the nested

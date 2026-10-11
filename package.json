@@ -15,7 +15,7 @@
     "typecheck": "tsc -p tsconfig.dev.json",
     "test": "pnpm run fix && pnpm run lint && pnpm run typecheck && pnpm run test:node && pnpm run test:dist && pnpm run test:browser",
     "test:browser": "playwright test",
-    "test:dist": "pnpm run build && ! grep -rl @interop/logger dist",
+    "test:dist": "pnpm run build && ! grep -rl @interop/logger dist && ! grep -rlE \"^(import|export) .*(from )?'(rxdb|@interop/was-sync/rxdb)\" --include=*.js dist && ! grep -rlE \"(from '|import\\(['\\\"])(rxdb|@interop/was-sync/rxdb)\" --include=*.d.ts dist",
     "test:node": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
@@ -83,6 +83,9 @@
       "optional": true
     },
     "react-router": {
+      "optional": true
+    },
+    "rxdb": {
       "optional": true
     }
   },

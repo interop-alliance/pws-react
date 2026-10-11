@@ -12,8 +12,16 @@ export default defineConfig({
     entries: ['src/index.ts', 'src/mui/index.ts'],
     // The replication driver arrives as a separate package now, and a linked
     // one is treated as source rather than a dependency, so name it explicitly
-    // for the same reason: lazy discovery re-optimizes mid-request.
-    include: ['@interop/was-sync/rxdb']
+    // for the same reason: lazy discovery re-optimizes mid-request. The same
+    // goes for the two `rxdb` entry points, which `LocalStore` reaches through
+    // a dynamic import (so a replica-less app resolves the root without the
+    // optional peer) and which the crawl of the entries above therefore does
+    // not reach.
+    include: [
+      '@interop/was-sync/rxdb',
+      'rxdb/plugins/core',
+      'rxdb/plugins/storage-dexie'
+    ]
   },
   // A linked `@interop/was-sync` checkout would carry its own `rxdb` in its
   // node_modules, so without this the driver and this library could each

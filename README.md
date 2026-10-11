@@ -61,12 +61,14 @@ Peer dependencies (install the ones you use):
 pnpm add react zustand rxdb
 ```
 
-`react >= 19`, `zustand ^5`, and `rxdb ^17.5` are required peers. `rxdb` stays
-required for now: the WAS replication driver moved out to `@interop/was-sync`
-(installed for you as a dependency, whose root entry needs no `rxdb`), but
-`LocalStore` is still exported from this package's root entry and imports `rxdb`
-itself. An app that never builds a local replica can drop the peer once that
-split lands.
+`react >= 19` and `zustand ^5` are required peers. `rxdb ^17.5` is an optional
+peer: every app that keeps a local replica (anything rendering
+`WasSessionProvider`) needs it, while an app that only reads wallet-owned shared
+collections through `SharedCollectionReader` builds no replica and can leave it
+out. `LocalStore` and `SyncController` load `rxdb` (and the replication driver's
+`@interop/was-sync/rxdb` entry) on first use rather than at import, so the root
+entry resolves without it; a missing `rxdb` surfaces at the first replica
+operation.
 
 The optional `@interop/was-react/mui` entry additionally needs `@mui/material`,
 `@mui/icons-material`, and `react-router`; the core entry never imports them.
@@ -598,7 +600,7 @@ cost.
 
 | Import                   | Contents                                                                             | Extra peers                                            |
 | ------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| `@interop/was-react`     | Core: config, identity, auth, sync, storage, session store, React provider and hooks | `react`, `zustand`, `rxdb`                             |
+| `@interop/was-react`     | Core: config, identity, auth, sync, storage, session store, React provider and hooks | `react`, `zustand`; `rxdb` to keep a local replica     |
 | `@interop/was-react/mui` | Optional `ProtectedRoute`, `ReconnectBanner`, `SyncStatusChip`                       | `@mui/material`, `@mui/icons-material`, `react-router` |
 | `@interop/was-react/dev` | Node-only `provisionDevGrants`                                                       | (none; Node only)                                      |
 

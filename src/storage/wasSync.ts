@@ -22,14 +22,12 @@
  * a recipient of, is skipped with a warning rather than failing the session.
  */
 import type { ZcapClient } from '@interop/ezcap'
-import type { RxChangeEvent } from 'rxdb/plugins/core'
 import type { CollectionEncryption } from '@interop/was-client'
 import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
 import { hasKeyEpochs } from '@interop/was-client/edv'
-import type { SyncedDoc } from '@interop/was-sync'
 import {
   isPublicCollection,
   type SharedCollectionConfig,
@@ -40,7 +38,7 @@ import { WasRemoteStore, type CollectionMetaRead } from './wasRemoteStore.js'
 import type { SpaceTrust } from './spaceTrust.js'
 import { SharedCollectionReader } from './sharedCollectionReader.js'
 import { acquireGovernedDescriptor } from './governedDescriptors.js'
-import type { LocalStore } from './localStore.js'
+import type { LocalStore, ReplicaChange } from './localStore.js'
 import type { SyncController } from './syncController.js'
 import { log } from '../log.js'
 
@@ -283,10 +281,7 @@ export async function startWasSync({
   collections: WasCollectionConfig[]
   localStore: LocalStore
   syncController: SyncController
-  onRemoteChange: (
-    collectionKey: string,
-    event: RxChangeEvent<SyncedDoc>
-  ) => void
+  onRemoteChange: (collectionKey: string, change: ReplicaChange) => void
   sharedCollections?: SharedCollectionConfig[]
   identityKeys?: {
     keyAgreementKey: IKeyAgreementKey

@@ -36,7 +36,6 @@
  * vanilla zustand store the hooks consume through context.
  */
 import { createStore, type StoreApi } from 'zustand/vanilla'
-import type { RxStorage } from 'rxdb/plugins/core'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { CollectionEncryption } from '@interop/was-client'
 import {
@@ -70,7 +69,11 @@ import {
   type LoginPhase
 } from '../auth/loginFlow.js'
 import { parseGrants, type ParsedGrants } from '../grants.js'
-import { LocalStore, dbNameForController } from '../storage/localStore.js'
+import {
+  LocalStore,
+  dbNameForController,
+  type ReplicaStorage
+} from '../storage/localStore.js'
 import {
   executeLocalWipe,
   snapshotWipeTargets,
@@ -266,7 +269,7 @@ export type WasAuthStore = StoreApi<AuthState>
  *   handlers the rehydrate mechanism drives
  * @param [options.seedStore] {SeedStore}   the session IndexedDB persistence
  *   (defaults to one bound to `<dbName>-session`; inject a fake for tests)
- * @param [options.storage] {RxStorage}   the RxDB storage for the local store
+ * @param [options.storage] {ReplicaStorage}   the storage for the local store
  *   (defaults to Dexie/IndexedDB; inject a fake for tests)
  * @returns {WasAuthStore}
  */
@@ -279,7 +282,7 @@ export function createAuthStore({
   config: WasAppConfig
   registry: StoreRegistry
   seedStore?: SeedStore
-  storage?: RxStorage<unknown, unknown>
+  storage?: ReplicaStorage
 }): WasAuthStore {
   const dbName = config.dbName ?? DEFAULT_DB_NAME
   const onboarding = config.onboarding ?? DEFAULT_ONBOARDING

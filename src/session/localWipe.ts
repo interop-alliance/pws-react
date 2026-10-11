@@ -31,9 +31,12 @@
  * recoverability of deleted IndexedDB data, and anything the app itself
  * persisted outside this library.
  */
-import type { RxStorage } from 'rxdb/plugins/core'
 import { DEFAULT_STORAGE_KEY_PREFIX } from '../config.js'
-import { LocalStore, dbNameForController } from '../storage/localStore.js'
+import {
+  LocalStore,
+  dbNameForController,
+  type ReplicaStorage
+} from '../storage/localStore.js'
 import { clearPersistedWriterId } from '../storage/writerId.js'
 import { log } from '../log.js'
 
@@ -207,8 +210,8 @@ async function deleteIdbDatabase({
  *
  * @param options {object}
  * @param options.targets {WipeTargets}
- * @param [options.storage] {RxStorage<unknown, unknown>}   the RxDB storage the
- *   replicas were created with (defaults to Dexie/IndexedDB)
+ * @param [options.storage] {ReplicaStorage}   the storage the replicas were
+ *   created with (defaults to Dexie/IndexedDB)
  * @param [options.idb] {IDBFactory}   the IndexedDB factory (defaults to the
  *   global one; inject a fake for tests)
  * @returns {Promise<LocalWipeReport>}
@@ -219,7 +222,7 @@ export async function executeLocalWipe({
   idb = indexedDB
 }: {
   targets: WipeTargets
-  storage?: RxStorage<unknown, unknown>
+  storage?: ReplicaStorage
   idb?: IDBFactory
 }): Promise<LocalWipeReport> {
   const issued = new Set<string>()

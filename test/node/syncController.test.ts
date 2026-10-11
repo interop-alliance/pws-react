@@ -14,11 +14,8 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createSyncController } from '@interop/was-sync/rxdb'
-import {
-  SyncController,
-  isAuthError
-} from '../../src/storage/syncController.js'
+import { createSyncController, isAuthError } from '@interop/was-sync/rxdb'
+import { SyncController } from '../../src/storage/syncController.js'
 import {
   createSyncStatusStore,
   deriveSyncRollup,
@@ -86,6 +83,27 @@ describe('SyncController stop-then-start latch', () => {
     // The latch short-circuits before any per-collection wiring runs.
     expect(collectionCapability).not.toHaveBeenCalled()
     expect(rxCollection).not.toHaveBeenCalled()
+    expect(syncStatus.getState().statuses).toEqual({})
+  })
+
+  it('never builds a core when stop() lands during the driver import', async () => {
+    const coreFactory = vi.mocked(createSyncController)
+    coreFactory.mockClear()
+    const controller = new SyncController({
+      collections: COLLECTIONS,
+      syncStatus
+    })
+    const { remoteStore } = fakeRemoteStore(() => ({}))
+    // `start()` suspends on the lazy driver import before it holds a core;
+    // a teardown that lands in that window must still win.
+    const starting = controller.start({
+      remoteStore,
+      localStore: { rxCollection: vi.fn() } as unknown as LocalStore
+    })
+    await controller.stop()
+    await starting
+
+    expect(coreFactory).not.toHaveBeenCalled()
     expect(syncStatus.getState().statuses).toEqual({})
   })
 })

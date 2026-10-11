@@ -4,6 +4,12 @@
 
 ### Added
 
+- `rxdb` is an optional peer, loaded lazily in `LocalStore.init()` /
+  `removeDatabase()` and `SyncController.start()`. A replica-less app installs
+  without it; an app that replicates adds it explicitly. New `ReplicaStorage`
+  and `ReplicaChange` types replace the `rxdb` types on the public surface, so
+  the declarations name no `rxdb` type. `test:dist` fails on a static `rxdb` or
+  `@interop/was-sync/rxdb` import in `dist` (WR-44).
 - `SyncController` declares the session's `writerId` to the server on every push
   (was-sync's `writerId` replication option, sent as the `Writer-Id` header).
   The new `WasSyncConfig.declareWriterId` (default `true`) opts out, withholding
@@ -11,6 +17,11 @@
 
 ### Changed
 
+- **BREAKING**: `isAuthError` is no longer re-exported from the root entry.
+  Import it from `@interop/was-sync/rxdb` (WR-44).
+- **BREAKING**: `LocalStore.rxCollection` is `@internal` and stripped from the
+  published declarations; its return type is RxDB's. Tests that reached the RxDB
+  collection through it must go through `LocalStore`'s own verbs (WR-44).
 - `resolveSpaceOwner` resolves the owner through wallet-core's
   `discoverAccountLog` instead of its own fetch, parse, and resolve body; the
   location check runs upstream.

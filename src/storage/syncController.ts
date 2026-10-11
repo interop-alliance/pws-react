@@ -20,23 +20,22 @@
  * A controller is single-use per session, which is the core's own rule: `stop()`
  * is terminal for a core instance, so the binding builds a fresh one inside
  * `start()` and resets the status store on stop.
+ *
+ * The core's `isAuthError` predicate is not re-exported here: import it from
+ * `@interop/was-sync/rxdb`, which this module itself only loads inside
+ * `start()`.
  */
-import type { RxChangeEvent } from 'rxdb/plugins/core'
-import { createSyncController } from '@interop/was-sync/rxdb'
 import type { SyncController as SyncControllerCore } from '@interop/was-sync/rxdb'
-import type { SyncedDoc } from '@interop/was-sync'
 import type { IZcap } from '@interop/data-integrity-core'
 import {
   DEFAULT_SYNC_POLL_MS,
   type WasCollectionConfig,
   type WasSyncConfig
 } from '../config.js'
-import type { LocalStore } from './localStore.js'
+import type { LocalStore, ReplicaChange } from './localStore.js'
 import type { WasRemoteStore } from './wasRemoteStore.js'
 import type { SyncStatusStore } from './syncStatusStore.js'
 import { log } from '../log.js'
-
-export { isAuthError } from '@interop/was-sync/rxdb'
 
 /**
  * The browser reachability source the core polls and subscribes through. An
@@ -113,8 +112,8 @@ export class SyncController {
    * @param options {object}
    * @param options.remoteStore {WasRemoteStore}
    * @param options.localStore {LocalStore}
-   * @param [options.onRemoteChange] {(collectionKey: string, event) => void}
-   *   fired per RxDB change (pull or conflict-resolved push) for reactive
+   * @param [options.onRemoteChange] {(collectionKey: string, change: ReplicaChange) => void}
+   *   fired per replica change (pull or conflict-resolved push) for reactive
    *   per-doc store patching
    * @param [options.onAuthError] {() => void}   fired when a replication error
    *   carries a 401/403 (storage access expired/revoked)
@@ -128,10 +127,7 @@ export class SyncController {
   }: {
     remoteStore: WasRemoteStore
     localStore: LocalStore
-    onRemoteChange?: (
-      collectionKey: string,
-      event: RxChangeEvent<SyncedDoc>
-    ) => void
+    onRemoteChange?: (collectionKey: string, change: ReplicaChange) => void
     onAuthError?: () => void
   }): Promise<void> {
     if (this.#core || this.#stopped) {
@@ -158,6 +154,17 @@ export class SyncController {
         continue
       }
       covered.push({ key, id, capability })
+    }
+    // The driver subpath is the one `@interop/was-sync` entry that imports
+    // `rxdb`, an optional peer here. Loading it at the first `start()` rather
+    // than at module evaluation is what lets a replica-less app resolve this
+    // package's root entry with `rxdb` absent.
+    const { createSyncController } = await import('@interop/was-sync/rxdb')
+    // The import is a suspension the guard above did not cover: a `stop()`
+    // (or a second `start()`) that landed meanwhile must win, or replication
+    // would start on a controller its owner already stopped.
+    if (this.#core || this.#stopped) {
+      return
     }
     this.#core = createSyncController({
       port: {

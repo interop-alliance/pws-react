@@ -121,7 +121,16 @@ export type {
 // Storage: local encrypted replica, the session-scoped storage context and
 // the app-facing facades over the active one, entity stores, the delegated
 // remote store, sync status, and the replication controller.
-export { LocalStore } from './storage/localStore.js'
+//
+// `LocalStore` and `SyncController` load `rxdb` (and the driver subpath
+// `@interop/was-sync/rxdb`) inside `init()` / `start()` rather than at module
+// evaluation, so this entry resolves with the optional `rxdb` peer absent: a
+// replica-less app (shared-collection reads only) installs without it.
+export {
+  LocalStore,
+  type ReplicaStorage,
+  type ReplicaChange
+} from './storage/localStore.js'
 // The per-collection document cipher and the WAS sync port stay here: they
 // bridge the driver to `@interop/was-client` and hold this library's key
 // handling, which the driver never touches.
@@ -175,7 +184,7 @@ export {
   type SyncStatus,
   type SyncStatusStore
 } from './storage/syncStatusStore.js'
-export { isAuthError, SyncController } from './storage/syncController.js'
+export { SyncController } from './storage/syncController.js'
 export { startWasSync, type WasSyncBootstrap } from './storage/wasSync.js'
 export { createSpaceTrust, type SpaceTrust } from './storage/spaceTrust.js'
 export { acquireGovernedDescriptor } from './storage/governedDescriptors.js'

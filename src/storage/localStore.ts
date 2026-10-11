@@ -24,15 +24,12 @@
  * SAME envelope id with `sequence`+1 (the mutable-head model); delete is an RxDB
  * soft-delete tombstone.
  */
-import {
-  createRxDatabase,
-  removeRxDatabase,
-  type RxCollection,
-  type RxDatabase,
-  type RxDocument,
-  type RxStorage
+import type {
+  RxCollection,
+  RxDatabase,
+  RxDocument,
+  RxStorage
 } from 'rxdb/plugins/core'
-import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 import {
   DEFAULT_DB_NAME,
   isPublicCollection,
@@ -199,6 +196,50 @@ function conflictSideDecrypt({
 }
 
 /**
+ * The storage a replica is created on, as the structural shape of RxDB's
+ * `RxStorage` this library passes through to `createRxDatabase` /
+ * `removeRxDatabase`. It is declared here rather than imported so the published
+ * declarations name no `rxdb` type: `rxdb` is an optional peer, and a
+ * replica-less consumer type-checks the root entry without it installed. Any
+ * real `RxStorage` satisfies it (the default Dexie one, or a test's
+ * fake-indexeddb-backed one), and the two call sites cast it back to
+ * `RxStorage` unchecked: nothing validates the object before RxDB receives it.
+ */
+export interface ReplicaStorage {
+  readonly name: string
+  readonly rxdbVersion: string
+  createStorageInstance(params: never): Promise<unknown>
+}
+
+/**
+ * One change on a replica collection, as the two members of RxDB's change event
+ * this library reads (and hands to `onRemoteChange` callbacks): the operation
+ * and the row after it. Declared here for the same reason as
+ * {@link ReplicaStorage}; every `RxChangeEvent<SyncedDoc>` satisfies it.
+ */
+export interface ReplicaChange {
+  operation: 'INSERT' | 'UPDATE' | 'DELETE'
+  documentData: SyncedDoc & { _deleted?: boolean }
+}
+
+/**
+ * The default storage, Dexie over IndexedDB, loaded on first use. `rxdb` is an
+ * optional peer: a replica-less app (one that only reads shared collections)
+ * installs this package without it, and resolves the root entry because nothing
+ * here imports `rxdb` at module evaluation. This loader and the two
+ * `rxdb/plugins/core` imports in `init()` and `removeDatabase()` are the only
+ * places this module reaches for it, all on an async path, so a missing peer
+ * fails there with the resolver's own error and nowhere earlier. A caller
+ * supplying its own `storage` never triggers this load.
+ *
+ * @returns {Promise<RxStorage<unknown, unknown>>}
+ */
+async function defaultStorage(): Promise<RxStorage<unknown, unknown>> {
+  const { getRxStorageDexie } = await import('rxdb/plugins/storage-dexie')
+  return getRxStorageDexie()
+}
+
+/**
  * The local store. Construct via {@link LocalStore.init}, which builds each
  * collection's cipher -- an EDV cipher on the app's identity KAK (private
  * collections) or the pass-through plaintext codec (public collections) -- and
@@ -343,8 +384,8 @@ export class LocalStore {
    *   registry here, before any replica exists
    * @param [options.descriptors] {Record<string, CollectionEncryption>}   cached
    *   encryption descriptors keyed by WAS collection id (from the offline cache)
-   * @param [options.storage] {RxStorage<unknown, unknown>}   defaults to
-   *   Dexie/IndexedDB; injectable for tests
+   * @param [options.storage] {ReplicaStorage}   defaults to Dexie/IndexedDB;
+   *   injectable for tests
    * @param [options.dbName] {string}   defaults to {@link DEFAULT_DB_NAME}
    * @returns {Promise<LocalStore>}
    */
@@ -362,7 +403,7 @@ export class LocalStore {
     collections: WasCollectionConfig[]
     sharedCollections?: SharedCollectionConfig[]
     descriptors?: Record<string, CollectionEncryption>
-    storage?: RxStorage<unknown, unknown>
+    storage?: ReplicaStorage
     dbName?: string
   }): Promise<LocalStore> {
     validateCollections(collections)
@@ -406,9 +447,13 @@ export class LocalStore {
       })
     )
 
+    // Loaded here rather than at module evaluation; see `defaultStorage`.
+    const { createRxDatabase } = await import('rxdb/plugins/core')
     const db = await createRxDatabase({
       name: dbName,
-      storage: storage ?? getRxStorageDexie(),
+      storage:
+        (storage as RxStorage<unknown, unknown> | undefined) ??
+        (await defaultStorage()),
       closeDuplicates: true,
       // Single-tab: RxDB gates replication on leadership under multiInstance;
       // multi-tab is deferred, so replicate directly in this tab.
@@ -1057,9 +1102,11 @@ export class LocalStore {
   }
 
   /**
-   * The live RxDB collection handle, for reactive subscriptions and the sync
-   * controller.
+   * The live RxDB collection handle, for the sync controller and the tests.
+   * Stripped from the published declarations (`@internal`), since its type is
+   * RxDB's and the root entry's declarations must name no `rxdb` type.
    *
+   * @internal
    * @param key {string}
    * @returns {RxCollection<SyncedDoc>}
    */
@@ -1092,8 +1139,8 @@ export class LocalStore {
    *
    * @param options {object}
    * @param options.dbName {string}   the full per-controller database name
-   * @param [options.storage] {RxStorage<unknown, unknown>}   defaults to
-   *   Dexie/IndexedDB; must match the storage the database was created with
+   * @param [options.storage] {ReplicaStorage}   defaults to Dexie/IndexedDB;
+   *   must match the storage the database was created with
    * @returns {Promise<void>}
    */
   static async removeDatabase({
@@ -1101,8 +1148,13 @@ export class LocalStore {
     storage
   }: {
     dbName: string
-    storage?: RxStorage<unknown, unknown>
+    storage?: ReplicaStorage
   }): Promise<void> {
-    await removeRxDatabase(dbName, storage ?? getRxStorageDexie())
+    const { removeRxDatabase } = await import('rxdb/plugins/core')
+    await removeRxDatabase(
+      dbName,
+      (storage as RxStorage<unknown, unknown> | undefined) ??
+        (await defaultStorage())
+    )
   }
 }

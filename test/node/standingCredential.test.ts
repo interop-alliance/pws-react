@@ -71,7 +71,7 @@ import {
   type WasAuthStore
 } from '../../src/session/authStore.js'
 import { startWasSync } from '../../src/storage/wasSync.js'
-import { isAuthError } from '../../src/storage/syncController.js'
+import { isAuthError } from '@interop/was-sync/rxdb'
 import { requireStore } from '../../src/storage/storageManager.js'
 import { isUnknownEpochError, WasSyncAuthError } from '@interop/was-client/sync'
 import {

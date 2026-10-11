@@ -11,6 +11,7 @@
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true,
+    "stripInternal": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
