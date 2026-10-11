@@ -68,6 +68,7 @@ import {
 } from '@interop/wallet-core/genesis'
 import { ID_COLLECTION_SPEC } from '@interop/wallet-core/space'
 import {
+  clientKeyAgreementKeyMultibase,
   clientSigningKeyMultibase,
   ensureDidWebvh,
   mintClientWebvhUpdateKeys,
@@ -219,14 +220,9 @@ export async function provisionDevGrants({
     zcapClient: clientZcapClient,
     keyAgreementKey: clientKeyAgreementKey
   } = agentsFromKeyAgent({ keyAgent })
-  const keyAgreementKeyMultibase = (
-    clientKeyAgreementKey as unknown as { publicKeyMultibase?: string }
-  ).publicKeyMultibase
-  if (!keyAgreementKeyMultibase) {
-    throw new Error(
-      'The provisioner key-agreement key has no public multibase.'
-    )
-  }
+  const keyAgreementKeyMultibase = clientKeyAgreementKeyMultibase({
+    keyAgreementKey: clientKeyAgreementKey
+  })
   const clientWas = new WasClient({ serverUrl, zcapClient: clientZcapClient })
   // Every run mints a fresh Space, so the update keys are minted per run too
   // and discarded with it: nothing ever appends to this log again.

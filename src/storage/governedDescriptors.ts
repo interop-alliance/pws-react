@@ -11,9 +11,14 @@
  * unknown-epoch refresh acquire through {@link acquireGovernedDescriptor}. A
  * shared collection's self-refreshing cipher acquires inside was-client's own
  * build and cannot, so it applies the same two rules itself: `requireGoverned`,
- * and {@link fetchErrorSink} for the swallowed-fetch rethrow.
+ * and {@link fetchErrorSink} for the swallowed-fetch rethrow. Both consumers
+ * classify what the acquisition refused with {@link isDescriptorRefusal}.
  */
-import { acquireDescriptor } from '@interop/was-client/edv'
+import {
+  acquireDescriptor,
+  UnverifiedDescriptorError
+} from '@interop/was-client/edv'
+import { isResourceLogRefusal } from '@interop/vh-resource-log'
 import type {
   EncryptionDescriptorCache,
   EncryptionDescriptorSource
@@ -70,6 +75,22 @@ export function fetchErrorSink(): {
       }
     }
   }
+}
+
+/**
+ * Whether an acquisition failure is a refusal that must surface as itself: a
+ * source that does not verify the governing log
+ * (`UnverifiedDescriptorError`, whose message names the fix), or a governing
+ * log the source refused to adopt (a forged or discontinuous chain, matched by
+ * name through vh-resource-log's own taxonomy). Both are security signals;
+ * relabeling either as "not a recipient" or as the envelope's unknown epoch
+ * would send it down a caller's warn-and-skip branch.
+ *
+ * @param err {unknown}
+ * @returns {boolean}
+ */
+export function isDescriptorRefusal(err: unknown): err is Error {
+  return err instanceof UnverifiedDescriptorError || isResourceLogRefusal(err)
 }
 
 /**

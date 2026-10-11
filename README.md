@@ -353,6 +353,11 @@ stored rows carry them), and simply omit them at the call site.
 outside React, `getWriterId({ storageKeyPrefix })` resolves it under the same
 prefix your config declares. Neither is needed to write.
 
+The same id is declared to the server on every push as the `Writer-Id` header,
+so the host can tell this install's writes apart from another install of the
+same app under the same grant. Set `sync: { declareWriterId: false }` to keep it
+off the wire; the payload stamp still carries it for LWW.
+
 A collection can additionally answer server-side equality queries, on either
 visibility. Declare the queryable content attributes in the collection config:
 

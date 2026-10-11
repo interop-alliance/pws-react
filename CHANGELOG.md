@@ -2,6 +2,13 @@
 
 ## 0.28.0 - TBD
 
+### Added
+
+- `SyncController` declares the session's `writerId` to the server on every push
+  (was-sync's `writerId` replication option, sent as the `Writer-Id` header).
+  The new `WasSyncConfig.declareWriterId` (default `true`) opts out, withholding
+  the label from the wire while the payload's LWW stamp is unchanged (WR-53).
+
 ### Changed
 
 - `resolveSpaceOwner` resolves the owner through wallet-core's
@@ -35,7 +42,18 @@
   `SharedCollectionReader.open` rethrows it ahead of
   `SharedCollectionUnavailableError`, and `LocalStore` surfaces it from the
   decrypt that met it and every later one, instead of the envelope's
-  unknown-epoch error.
+  unknown-epoch error. A governing log the source refuses to adopt (a forged or
+  discontinuous chain, vh-resource-log's `isResourceLogRefusal`) surfaces the
+  same way at both sites. Any other refresh failure in `LocalStore` is logged at
+  `warn` and re-asked on the next unknown-epoch decrypt.
+- `resolveSpaceOwner` takes an optional `pinStore`, and `createSpaceTrust`
+  passes its own, so the owner's account log is checked for chain-head
+  continuity across resolutions within one activation like every collection log
+  is.
+- `createSpaceTrust`, `SpaceTrust`, `resolveSpaceOwner`, and
+  `acquireGovernedDescriptor` are exported from the root entry, so a consumer
+  building its own `WasRemoteStore` or `LocalStore` can share one trust across
+  stores and build a verifying descriptor source.
 - `provisionDevGrants` builds what a wallet's account genesis builds: a Space
   promoted to a did:webvh owner whose log is published at `id/did.jsonl`, and
   every private collection's epoch zero installed as the genesis of its
@@ -52,8 +70,8 @@
   no log stays fail-closed under the policy above, so the bare declaration had
   nothing left to do.
 - Add `@interop/vh-resource-log` as a dependency.
-- Bump `@interop/was-sync` to 0.9.0 and `@interop/was-client` to 0.94.0. The
-  ack write-back now stamps a pushed row's `updatedAt`, `updatedAtCounter`,
+- Bump `@interop/was-sync` to 0.9.0 and `@interop/was-client` to 0.94.0. The ack
+  write-back now stamps a pushed row's `updatedAt`, `updatedAtCounter`,
   `originId`, `createdBy`, and `meta` from the write response itself, so a row
   this replica created no longer depends on the feed echo for its server stamp
   (needs a server answering `201` / `200` with a body, was-teaching-server

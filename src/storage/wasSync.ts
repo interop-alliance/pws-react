@@ -121,9 +121,9 @@ async function readGrantedEncryption({
       const isPublic = isPublicCollection(collection)
       // A private collection's descriptor is the verified head of its
       // governing log, acquired through the store's log-governed source under
-      // `requireGoverned`, never the `encryption` projection the Metadata
-      // object serves; a descriptor the caller acquired seconds ago is reused
-      // as-is. The object itself is read only for the hook: a public
+      // `requireGoverned`. The `encryption` projection the Metadata object
+      // serves is not read for it. A descriptor the caller acquired seconds
+      // ago is reused as-is. The object itself is read only for the hook: a public
       // collection declaring indexes wants the `plaintext` declaration
       // baseline off it, a private one whose descriptor was not already known
       // the `custom` envelope its blinded-index install reuses (otherwise the

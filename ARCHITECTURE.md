@@ -254,6 +254,18 @@ reading it. `LocalStore`'s own verbs do NOT stamp -- they are the raw layer the
 adoption merge and the sync path write through, both of which own their stamping
 rules.
 
+The same label also travels on the wire. The session's `SyncController` hands
+`StorageContext.writerId` to the was-sync core as its writer-attribution label,
+so every push declares it as the `Writer-Id` header. The pull side does not read
+the label: the pull handler decrypts nothing, so an echo of the replica's own
+write has no decrypt to skip. No second label is minted: the payload's LWW stamp
+and the header are two carriers of one value. The host learns from it how many
+installs of an app write for a user, which is the trade the WAS spec's
+writer-attribution section accepts and keeps optional.
+`sync.declareWriterId: false` withholds the wire carrier: pushes declare no
+label (which clears any the server held, under its declare-or-clear rule), while
+the payload stamping is unchanged.
+
 ## Login With Wallet: the App Connect protocol
 
 Login is a single CHAPI `get`. `buildAppConnectVpr` emits a verifiable
@@ -852,15 +864,23 @@ with no governing log answers no descriptor and stays fail-closed.
 names the fix: the shared reader rethrows it ahead of
 `SharedCollectionUnavailableError`, and the local store records the refusal its
 refresh met and throws it from the decrypt that spent the refresh and every
-later one, rather than the envelope's unknown-epoch error. The owner's
-controller view and the chain-head pins live together on one `SpaceTrust`
-(`src/storage/spaceTrust.ts`), created by the auth store per connected
-activation and handed to both the login-time read's store and the bootstrap's
-store (`fromGrants` takes it as `trust`), so the owner's log is fetched and
-verified once and a head served to the second store continues what the first
-pinned. The pins are in memory: continuity is checked within a session, and a
-reload trusts the served head afresh. The owner resolution is kept only when it
-succeeds; a failed fetch is retried by the next read rather than remembered.
+later one, rather than the envelope's unknown-epoch error. A governing log the
+source refuses to adopt (a forged or discontinuous chain) is treated the same
+way at both sites (one predicate, `isDescriptorRefusal`, classifies both kinds),
+since relabeling it as "not a recipient" or as a foreign envelope would hide a
+security signal. Any other refresh failure (a dropped connection) is logged and
+leaves the refresh un-spent, so the next unknown-epoch decrypt re-asks. The
+owner's controller view and the chain-head pins live together on one
+`SpaceTrust` (`src/storage/spaceTrust.ts`), created by the auth store per
+connected activation and handed to both the login-time read's store and the
+bootstrap's store (`fromGrants` takes it as `trust`), so the owner's log is
+fetched and verified once and a head served to the second store continues what
+the first pinned. The owner's own account log is pinned in the same store, so a
+resolution retried after a failed one continues the chain the first pinned
+rather than adopting whatever the host serves next. The pins are in memory:
+continuity is checked within a session, and a reload trusts the served head
+afresh. The owner resolution is kept only when it succeeds; a failed fetch is
+retried by the next read rather than remembered.
 
 `readRemoteDescriptors` is the login-time counterpart. It acquires one
 descriptor per granted private collection before any replication exists, because

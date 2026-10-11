@@ -109,6 +109,14 @@ export interface WasSyncConfig {
    * to 0 to disable the periodic poll.
    */
   pollMs?: number
+  /**
+   * Whether every push declares the session's `writerId` to the server as the
+   * `Writer-Id` header (default `true`). The label lets the host tell several
+   * installs of one app apart when they share one delegated capability.
+   * `false` withholds it: pushes declare no label (which clears any the
+   * server held), while the payload's own `writerId` LWW stamp is unchanged.
+   */
+  declareWriterId?: boolean
 }
 
 /**

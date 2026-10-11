@@ -160,7 +160,7 @@ describe('readRemoteDescriptors', () => {
 
   it('does not take a Metadata object read for the descriptor', async () => {
     // The login-time read wants nothing off the Metadata object: the
-    // descriptor is the verified log head, never the served projection.
+    // descriptor is the verified log head, not the served projection.
     const remote = stubRemoteStore({ notes: descriptor, tasks: undefined })
     await readRemoteDescriptors({ parsed, zcapClient, collections })
     expect(remote.readCollectionMeta).not.toHaveBeenCalled()

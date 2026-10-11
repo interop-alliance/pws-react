@@ -54,12 +54,16 @@ export function createSpaceTrust({
   spaceId: string
 }): SpaceTrust {
   let resolved: Promise<WebvhResourceLogController> | undefined
+  // The owner's own log is pinned in the same store the collection logs are:
+  // a resolution retried after a failed one must continue the chain the
+  // first pinned, not adopt whatever the host serves next.
+  const pinStore = memoryResourceLogPinStore()
   return {
-    pinStore: memoryResourceLogPinStore(),
+    pinStore,
     owner() {
       const owner =
         resolved ??
-        resolveSpaceOwner({ serverUrl, spaceId }).then(
+        resolveSpaceOwner({ serverUrl, spaceId, pinStore }).then(
           webvhResourceLogController
         )
       resolved = owner

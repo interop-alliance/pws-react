@@ -6,12 +6,15 @@
  * latch (a `stop()` that raced an in-flight bootstrap keeps a later `start()` a
  * no-op), the skip-uncovered-collections behavior (a collection the grant set
  * does not cover is flagged and skipped rather than replicated capability-less),
- * and the failed bring-up (a throw during `start()` unwinds, flags every
- * collection as errored, rethrows, and leaves the controller re-startable).
+ * the failed bring-up (a throw during `start()` unwinds, flags every
+ * collection as errored, rethrows, and leaves the controller re-startable), and
+ * the writer-id pass-through (the session's label reaches the core by default
+ * and is withheld under `sync.declareWriterId: false`).
  *
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createSyncController } from '@interop/was-sync/rxdb'
 import {
   SyncController,
   isAuthError
@@ -24,6 +27,13 @@ import {
 import { WasSyncAuthError } from '@interop/was-client/sync'
 import type { WasRemoteStore } from '../../src/storage/wasRemoteStore.js'
 import type { LocalStore } from '../../src/storage/localStore.js'
+
+// The core's factory is wrapped, not replaced: every suite here runs against
+// the real core, and the writer-id suite reads the options the binding built.
+vi.mock('@interop/was-sync/rxdb', async importOriginal => {
+  const actual = await importOriginal<typeof import('@interop/was-sync/rxdb')>()
+  return { ...actual, createSyncController: vi.fn(actual.createSyncController) }
+})
 
 const COLLECTIONS = [{ key: 'notes', id: 'notes' }]
 
@@ -190,5 +200,48 @@ describe('SyncController uncovered-collection skip', () => {
     expect(warn).toHaveBeenCalled()
 
     await controller.stop()
+  })
+})
+
+describe('SyncController writer-id pass-through', () => {
+  const coreFactory = vi.mocked(createSyncController)
+
+  /**
+   * Starts a controller under the given sync config and returns the options
+   * the binding handed the core.
+   */
+  async function coreOptionsFor(sync: {
+    pollMs: number
+    declareWriterId?: boolean
+  }): Promise<{ writerId?: string }> {
+    const controller = new SyncController({
+      collections: COLLECTIONS,
+      syncStatus,
+      writerId: 'writer-1',
+      sync
+    })
+    const { remoteStore } = fakeRemoteStore(() => undefined)
+    await controller.start({
+      remoteStore,
+      localStore: { rxCollection: vi.fn() } as unknown as LocalStore
+    })
+    await controller.stop()
+    return coreFactory.mock.calls.at(-1)![0]
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    coreFactory.mockClear()
+  })
+
+  it('declares the session writerId to the core by default', async () => {
+    expect(await coreOptionsFor({ pollMs: 0 })).toMatchObject({
+      writerId: 'writer-1'
+    })
+  })
+
+  it('withholds the label under sync.declareWriterId: false', async () => {
+    const options = await coreOptionsFor({ pollMs: 0, declareWriterId: false })
+    expect(options).not.toHaveProperty('writerId')
   })
 })

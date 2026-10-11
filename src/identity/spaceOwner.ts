@@ -25,29 +25,39 @@
  * log-governed descriptor read is checked against.
  */
 import type { DIDLog } from '@interop/did-method-webvh'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import { discoverAccountLog } from '@interop/wallet-core/webvh'
 
 /**
  * Fetches and resolves the account log published in a Space's `id`
- * collection, and checks that the resolved DID names that location.
+ * collection, and checks that the resolved DID names that location. Given a
+ * `pinStore`, the log is also checked for continuity against the chain-head
+ * pinned there and refused on a rollback, a fork, or an SCID switch, so a
+ * host cannot swap the owner's log out between two resolutions in one
+ * session.
  *
  * @param options {object}
  * @param options.serverUrl {string}   the WAS base URL
  * @param options.spaceId {string}
+ * @param [options.pinStore] {ResourceLogPinStore}   this session's chain-head
+ *   pins
  * @returns {Promise<{ did: string, log: DIDLog }>}   the owner's did:webvh and
  *   its verified log
  */
 export async function resolveSpaceOwner({
   serverUrl,
-  spaceId
+  spaceId,
+  pinStore
 }: {
   serverUrl: string
   spaceId: string
+  pinStore?: ResourceLogPinStore
 }): Promise<{ did: string; log: DIDLog }> {
   try {
     const { did, log } = await discoverAccountLog({
       spaceId,
-      host: serverUrl
+      host: serverUrl,
+      ...(pinStore && { pinStore })
     })
     return { did, log }
   } catch (err) {

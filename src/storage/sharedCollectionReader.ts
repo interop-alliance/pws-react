@@ -43,7 +43,6 @@ import type {
 } from '@interop/data-integrity-core'
 import {
   createRefreshingEdvDocCipher,
-  UnverifiedDescriptorError,
   type EncryptionDescriptorCache,
   type EncryptionDescriptorSource
 } from '@interop/was-client/edv'
@@ -54,7 +53,11 @@ import {
 } from '@interop/was-client/sync'
 import type { Json } from '@interop/was-sync'
 import type { WasRemoteStore } from './wasRemoteStore.js'
-import { fetchErrorSink, memoryDescriptorCache } from './governedDescriptors.js'
+import {
+  fetchErrorSink,
+  isDescriptorRefusal,
+  memoryDescriptorCache
+} from './governedDescriptors.js'
 import { log } from '../log.js'
 
 /**
@@ -475,10 +478,9 @@ async function buildSharedCipher({
   } catch (err) {
     // A build that fails over a swallowed fetch failed because of it.
     sink.rethrow()
-    // A refused source is a wiring fault, not a share this app lacks: the
-    // error names the fix (read through a log-governed source), so it is
-    // surfaced as itself rather than as "not a recipient".
-    if (err instanceof UnverifiedDescriptorError) {
+    // A refusal is a wiring fault or a security signal, not a share this app
+    // lacks, so it is surfaced as itself rather than as "not a recipient".
+    if (isDescriptorRefusal(err)) {
       throw err
     }
     throw new SharedCollectionUnavailableError(

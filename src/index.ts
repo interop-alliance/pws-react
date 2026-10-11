@@ -177,6 +177,9 @@ export {
 } from './storage/syncStatusStore.js'
 export { isAuthError, SyncController } from './storage/syncController.js'
 export { startWasSync, type WasSyncBootstrap } from './storage/wasSync.js'
+export { createSpaceTrust, type SpaceTrust } from './storage/spaceTrust.js'
+export { acquireGovernedDescriptor } from './storage/governedDescriptors.js'
+export { resolveSpaceOwner } from './identity/spaceOwner.js'
 
 // Session lifecycle: the session auth store factory (the four-state machine),
 // and the wipe enumeration behind `clearLocalData`.

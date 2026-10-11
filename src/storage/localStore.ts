@@ -60,12 +60,11 @@ import {
 } from './docCipher.js'
 import { log } from '../log.js'
 import { remotePayloadWins } from '@interop/social-core'
+import { epochRostersEqual, hasKeyEpochs } from '@interop/was-client/edv'
 import {
-  epochRostersEqual,
-  hasKeyEpochs,
-  UnverifiedDescriptorError
-} from '@interop/was-client/edv'
-import { acquireGovernedDescriptor } from './governedDescriptors.js'
+  acquireGovernedDescriptor,
+  isDescriptorRefusal
+} from './governedDescriptors.js'
 import { isIntegrityError, isUnknownEpochError } from '@interop/was-client/sync'
 import type {
   IKeyAgreementKey,
@@ -236,10 +235,11 @@ export class LocalStore {
   readonly #refreshPolicy: DescriptorRefreshPolicy
   readonly #refreshing = new Map<string, Promise<void>>()
   // Per collection, the refusal its refresh met: a source that does not
-  // verify the governing log. Kept so the decrypt that spent the refresh, and
-  // every later one, surfaces that refusal as itself rather than as the
-  // envelope's unknown epoch (see `#decryptWithRefresh`).
-  readonly #refusals = new Map<string, UnverifiedDescriptorError>()
+  // verify the governing log, or a governing log the source refused to
+  // adopt. Kept so the decrypt that spent the refresh, and every later one,
+  // surfaces that refusal as itself rather than as the envelope's unknown
+  // epoch (see `#decryptWithRefresh`).
+  readonly #refusals = new Map<string, Error>()
 
   private constructor({
     db,
@@ -293,10 +293,20 @@ export class LocalStore {
           // installed once), so the refresh is spent rather than un-armed:
           // the policy would otherwise re-ask on every decrypt. The refusal
           // is what the decrypt surfaces.
-          if (err instanceof UnverifiedDescriptorError) {
+          if (isDescriptorRefusal(err)) {
             this.#refusals.set(collectionId, err)
             return
           }
+          // Any other failure (a dropped connection, a 5xx) is rethrown into
+          // the policy, which un-arms the guard without a word; the memo is
+          // dropped with it so the next decrypt re-asks, and the failure is
+          // logged here since nothing downstream will.
+          log.warn(
+            'Descriptor refresh for an unknown key epoch failed; the next ' +
+              'decrypt that meets one retries it.',
+            { collectionId, err }
+          )
+          this.#refreshing.delete(collectionId)
           throw err
         }
         if (hasKeyEpochs(encryption)) {

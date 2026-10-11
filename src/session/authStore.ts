@@ -452,6 +452,7 @@ export function createAuthStore({
     controller = new SyncController({
       collections: config.collections,
       syncStatus: storageContext.syncStatus,
+      writerId: storageContext.writerId,
       ...(config.sync && { sync: config.sync })
     })
     const { remoteStore, sharedCollections } = await startWasSync({

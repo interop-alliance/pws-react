@@ -11,9 +11,11 @@
  * failed-bring-up unwind. What this binding owns is everything app-shaped: the
  * port built from the session's {@link WasRemoteStore} and {@link LocalStore},
  * the browser reachability source, the poll interval from the app's
- * {@link WasSyncConfig}, and the Zustand {@link SyncStatusStore} the statuses
- * are written into (keyed by the registry's LOGICAL collection key, which is
- * the first argument the core delivers).
+ * {@link WasSyncConfig}, the session's `writerId` handed to the core as its
+ * writer-attribution label (unless the config's `declareWriterId` opts out),
+ * and the Zustand {@link SyncStatusStore} the statuses are written into (keyed
+ * by the registry's LOGICAL collection key, which is the first argument the
+ * core delivers).
  *
  * A controller is single-use per session, which is the core's own rule: `stop()`
  * is terminal for a core instance, so the binding builds a fresh one inside
@@ -67,6 +69,7 @@ export class SyncController {
   #collections: WasCollectionConfig[]
   #sync: WasSyncConfig
   #syncStatus: SyncStatusStore
+  #writerId?: string
   #core?: SyncControllerCore
   #stopped = false
 
@@ -75,19 +78,26 @@ export class SyncController {
    * @param options.collections {WasCollectionConfig[]}
    * @param options.syncStatus {SyncStatusStore}   the session's per-collection
    *   status store this controller reports into
+   * @param [options.writerId] {string}   the session's resolved writer id
+   *   (`StorageContext.writerId`, the same label the payloads are stamped
+   *   with); declared on every push as `Writer-Id` unless
+   *   `sync.declareWriterId` is `false`
    * @param [options.sync] {WasSyncConfig}
    */
   constructor({
     collections,
     syncStatus,
+    writerId,
     sync
   }: {
     collections: WasCollectionConfig[]
     syncStatus: SyncStatusStore
+    writerId?: string
     sync?: WasSyncConfig
   }) {
     this.#collections = collections
     this.#syncStatus = syncStatus
+    this.#writerId = writerId
     this.#sync = sync ?? {}
   }
 
@@ -180,7 +190,12 @@ export class SyncController {
       ...(onAuthError && { onAuthError }),
       ...(onRemoteChange && { onRemoteChange }),
       onlineSource: browserOnlineSource(),
-      pollMs: this.#sync.pollMs ?? DEFAULT_SYNC_POLL_MS
+      pollMs: this.#sync.pollMs ?? DEFAULT_SYNC_POLL_MS,
+      // One label, two carriers: the payload's LWW stamp and the wire's
+      // `Writer-Id` header. The opt-out withholds the wire carrier only, so
+      // pushes declare no label; the pull side never reads it.
+      ...(this.#writerId !== undefined &&
+        this.#sync.declareWriterId !== false && { writerId: this.#writerId })
     })
     try {
       await this.#core.start()
