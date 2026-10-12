@@ -388,7 +388,7 @@ async function connectedStore({
     session: {
       seed,
       controllerDid,
-      serverUrl: SERVER_URL,
+      baseUrl: SERVER_URL,
       spaceId: SPACE_ID,
       grants,
       // The persisted expiry is the one the clamp produced, not the one the
@@ -445,9 +445,9 @@ describe('a depth-3 grant from a standing-credential account', () => {
       controllerDid,
       collections: [{ id: COLLECTION_ID }]
     })
-    expect(checked.parsed.serverUrl).toBe(SERVER_URL)
-    expect(checked.parsed.spaceId).toBe(SPACE_ID)
-    expect(checked.parsed.byCollectionId[COLLECTION_ID]).toBe(deep)
+    expect(checked.parsed!.baseUrl).toBe(SERVER_URL)
+    expect(checked.parsed!.spaceId).toBe(SPACE_ID)
+    expect(checked.parsed!.byCollectionId[COLLECTION_ID]).toBe(deep)
 
     // Routing goes through `parseGrants` alone, on the invocation target.
     const parsed = parseGrants([deep])
@@ -479,7 +479,7 @@ describe('a depth-3 grant from a standing-credential account', () => {
       annexGrantFor({ controller: controllerDid, collectionId, parent })
     )
     const parsed = parseGrants(grants)
-    expect(parsed.serverUrl).toBe(SERVER_URL)
+    expect(parsed.baseUrl).toBe(SERVER_URL)
     expect(parsed.spaceId).toBe(SPACE_ID)
     expect(Object.keys(parsed.byCollectionId).sort()).toEqual([
       'notes',
@@ -526,7 +526,7 @@ describe('the response presentation holder', () => {
     // Both visits verified and produced the same app identity.
     for (const outcome of outcomes) {
       expect(outcome.identity.controllerDid).toBe(controllerDid)
-      expect(Object.keys(outcome.parsed.byCollectionId)).toEqual([
+      expect(Object.keys(outcome.parsed!.byCollectionId)).toEqual([
         COLLECTION_ID
       ])
     }

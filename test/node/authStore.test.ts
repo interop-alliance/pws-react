@@ -358,7 +358,7 @@ async function persistSession({
     session: {
       seed,
       controllerDid: identity.controllerDid,
-      serverUrl: 'http://localhost:3999',
+      baseUrl: 'http://localhost:3999',
       spaceId: 'space-1',
       grants,
       expires
@@ -644,6 +644,33 @@ describe('login()', () => {
     expect(store.getState().controllerDid).toBe(identity.controllerDid)
     // Nothing to adopt (the local replica is empty), so the anon seed survives.
     expect(await anon.loadSeed()).toEqual(anonSeed)
+  })
+
+  it('lands connected with no replication when the wallet returned no grants', async () => {
+    // A shared-only app whose user declined every share: `collections` is
+    // empty, the wallet answered with no grants, and the checked grant set
+    // names no server and no Space.
+    const config = { ...baseConfig(), collections: [] }
+    const store = makeStore(config, newSeedStore())
+    await store.getState().boot()
+    const walletSeed = crypto.getRandomValues(new Uint8Array(32))
+    const identity = await deriveIdentity({ seed: walletSeed })
+    loginWithWalletMock.mockResolvedValue({
+      seed: walletSeed,
+      identity,
+      grants: [],
+      expires: futureIso(FAR_FUTURE_MS),
+      firstRun: true
+    })
+    startWasSyncMock.mockClear()
+
+    const outcome = await store.getState().login()
+
+    expect(outcome).toEqual({ firstRun: true })
+    expect(store.getState().status).toBe('connected')
+    expect(store.getState().error).toBeNull()
+    expect(store.getState().controllerDid).toBe(identity.controllerDid)
+    expect(startWasSyncMock).not.toHaveBeenCalled()
   })
 
   it('leaves local intact when the wallet login is cancelled', async () => {

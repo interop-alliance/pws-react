@@ -116,7 +116,7 @@ beforeAll(async () => {
 
   // The blinding key installs with the collection's first key epoch or never.
   const provisioned = await provisionDevGrants({
-    serverUrl,
+    serverUrl: `${serverUrl}/spaces/`,
     seed: SEED,
     collections: [
       { id: PRIVATE_ID, visibility: 'private', blindedIndex: true },

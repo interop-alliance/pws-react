@@ -151,7 +151,7 @@ async function connectedStore({
     session: {
       seed,
       controllerDid: identity.controllerDid,
-      serverUrl: 'http://localhost:3999',
+      baseUrl: 'http://localhost:3999',
       spaceId: 'space-1',
       grants,
       expires
@@ -173,7 +173,7 @@ describe('activateConnected fallback on failure', () => {
       session: {
         seed,
         controllerDid: identity.controllerDid,
-        serverUrl: 'http://localhost:3999',
+        baseUrl: 'http://localhost:3999',
         spaceId: 'space-1',
         grants: noteGrants(),
         expires: futureIso(FAR_FUTURE_MS)
@@ -286,7 +286,7 @@ describe('reconnect() with a failing re-grant', () => {
       session: {
         seed,
         controllerDid: identity.controllerDid,
-        serverUrl: 'http://localhost:3999',
+        baseUrl: 'http://localhost:3999',
         spaceId: 'space-1',
         grants: noteGrants(),
         expires: pastIso(1000)

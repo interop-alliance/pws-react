@@ -103,7 +103,11 @@ export interface LoginOutcome {
   seed: Uint8Array
   identity: IdentityAgents
   grants: IZcap[]
-  parsed: ParsedGrants
+  /**
+   * The storage topology the grants name; absent for a grant-less login (see
+   * `CheckedGrants.parsed`).
+   */
+  parsed?: ParsedGrants
   /**
    * ISO timestamp: the earliest expiry across the grants.
    */
@@ -200,7 +204,6 @@ function checkGrantsForCollections({
     }
     return {
       grants: [],
-      parsed: { serverUrl: '', spaceId: '', byCollectionId: {} },
       expires: new Date(Date.now() + NO_EXPIRY_MS).toISOString()
     }
   }
@@ -403,7 +406,7 @@ export async function loginWithWallet({
     seed,
     identity,
     grants: checked.grants,
-    parsed: checked.parsed,
+    ...(checked.parsed && { parsed: checked.parsed }),
     expires: checked.expires,
     firstRun
   }

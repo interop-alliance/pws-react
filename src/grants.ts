@@ -11,21 +11,24 @@
  * per-collection routing) straight out of their `invocationTarget` URLs.
  *
  * Every grant's `invocationTarget` is an absolute WAS URL of the form
- * `<serverUrl>/space/<spaceId>/<collectionId>` (a trailing slash is tolerated).
- * All grants MUST resolve to a single server origin and a single space; a
- * mismatch aborts (a grant set spanning two spaces is never expected and would
- * silently split writes).
+ * `<baseUrl>/space/<spaceId>/<collectionId>` (a trailing slash is tolerated),
+ * where the base URL may carry a sub-path mount (`https://host/was`). The
+ * `WasClient` built over a grant set takes the Spaces Repository URL beneath
+ * that base (`spacesUrl` from `@interop/was-client/paths`), a URL the WAS
+ * server itself answers, which the bare origin need not be. All grants MUST
+ * resolve to a single server and a single space; a mismatch aborts (a grant
+ * set spanning two spaces is never expected and would silently split writes).
  */
-import { parseSpaceTarget } from '@interop/was-client'
+import { parseAbsoluteSpaceTarget } from '@interop/was-client/paths'
 import type { IZcap } from '@interop/data-integrity-core'
 
 /**
- * The topology parsed out of a delegated grant set: the WAS server origin (the
- * exact string a `WasClient` / `SERVER_URL` must match), the single space id,
- * and the per-collection capability keyed by WAS collection id.
+ * The topology parsed out of a delegated grant set: the WAS server's base URL
+ * (origin plus any sub-path mount, read off the grant targets), the single
+ * space id, and the per-collection capability keyed by WAS collection id.
  */
 export interface ParsedGrants {
-  serverUrl: string
+  baseUrl: string
   spaceId: string
   /**
    * Keyed by WAS collection id (e.g. `action-items`).
@@ -34,49 +37,40 @@ export interface ParsedGrants {
 }
 
 /**
- * Parses a single `invocationTarget` URL into its WAS components: the server
- * origin, the space id, and the collection (every routed grant is
- * collection-scoped, so `collectionId` is always present). `serverUrl` is
- * the bare origin (`protocol//host`) with no trailing slash, matching the shape
- * the reference server validates `SERVER_URL` into; the path grammar itself is
- * owned by `@interop/was-client`'s `parseSpaceTarget`. A collection- or
- * resource-depth target contributes its collection; a space-scoped or reserved
- * sub-endpoint target (e.g. bare `/space/:id` or `/space/:id/policy`) carries no
- * collection and is rejected -- login only ever requests collection-scoped
- * capabilities.
+ * Parses a single `invocationTarget` URL into its WAS components: the server's
+ * base URL, the space id, and the collection (every routed grant is
+ * collection-scoped, so `collectionId` is always present). The base URL is
+ * read off the target itself, sub-path mount included, by
+ * `@interop/was-client`'s `parseAbsoluteSpaceTarget`, which also owns the path
+ * grammar. A collection- or resource-depth target contributes its collection; a
+ * space-scoped or reserved sub-endpoint target (e.g. bare `/space/:id` or
+ * `/space/:id/policy`) carries no collection and is rejected -- login only
+ * ever requests collection-scoped capabilities.
  *
  * @param target {string}   an absolute WAS URL
- * @returns {{ serverUrl: string, spaceId: string, collectionId: string }}
+ * @returns {{ baseUrl: string, spaceId: string, collectionId: string }}
  */
 export function parseInvocationTarget(target: string): {
-  serverUrl: string
+  baseUrl: string
   spaceId: string
   collectionId: string
 } {
-  let url: URL
-  try {
-    url = new URL(target)
-  } catch {
-    throw new Error(
-      `Grant invocationTarget is not an absolute URL: "${target}".`
-    )
-  }
-  const serverUrl = `${url.protocol}//${url.host}`
-  const parsed = parseSpaceTarget({ serverUrl, target })
+  const parsed = parseAbsoluteSpaceTarget(target)
   if (parsed === null) {
     throw new Error(
-      `Grant invocationTarget is not a WAS space URL: "${target}".`
+      `Grant invocationTarget is not an absolute WAS space URL: "${target}".`
     )
   }
-  if (!('collectionId' in parsed)) {
+  const { path } = parsed
+  if (!('collectionId' in path)) {
     throw new Error(
       `Grant invocationTarget is not collection-scoped: "${target}".`
     )
   }
   return {
-    serverUrl,
-    spaceId: parsed.spaceId,
-    collectionId: parsed.collectionId
+    baseUrl: parsed.baseUrl,
+    spaceId: path.spaceId,
+    collectionId: path.collectionId
   }
 }
 
@@ -97,43 +91,39 @@ function invocationTargetOf(zcap: IZcap): string {
 
 /**
  * Parses a delegated grant set into the sync topology. Asserts a single server
- * origin and a single space across every grant, and routes each collection-scoped
- * grant to its WAS collection id. Every grant must be collection-scoped; a
- * space-scoped grant (no collection segment) is rejected.
+ * (base URL, sub-path mount included) and a single space across every grant,
+ * and routes each collection-scoped grant to its WAS collection id. Every
+ * grant must be collection-scoped; a space-scoped grant (no collection
+ * segment) is rejected.
  *
  * @param zcaps {IZcap[]}   the delegated capabilities
  * @returns {ParsedGrants}
  */
 export function parseGrants(zcaps: IZcap[]): ParsedGrants {
-  if (zcaps.length === 0) {
+  const [head, ...rest] = zcaps
+  if (head === undefined) {
     throw new Error('No grants to parse.')
   }
-  let serverUrl: string | undefined
-  let spaceId: string | undefined
-  const byCollectionId: Record<string, IZcap> = {}
+  // The first target's server and space are the set's; every later target is
+  // checked against them.
+  const first = parseInvocationTarget(invocationTargetOf(head))
+  const byCollectionId: Record<string, IZcap> = { [first.collectionId]: head }
 
-  for (const zcap of zcaps) {
+  for (const zcap of rest) {
     const parsed = parseInvocationTarget(invocationTargetOf(zcap))
-    if (serverUrl === undefined) {
-      serverUrl = parsed.serverUrl
-    } else if (serverUrl !== parsed.serverUrl) {
+    if (first.baseUrl !== parsed.baseUrl) {
       throw new Error(
-        `Grants span two servers: "${serverUrl}" vs "${parsed.serverUrl}".`
+        `Grants span two servers: "${first.baseUrl}" vs "${parsed.baseUrl}".`
       )
     }
-    if (spaceId === undefined) {
-      spaceId = parsed.spaceId
-    } else if (spaceId !== parsed.spaceId) {
+    if (first.spaceId !== parsed.spaceId) {
       throw new Error(
-        `Grants span two spaces: "${spaceId}" vs "${parsed.spaceId}".`
+        `Grants span two spaces: "${first.spaceId}" vs "${parsed.spaceId}".`
       )
     }
     byCollectionId[parsed.collectionId] = zcap
   }
 
-  return {
-    serverUrl: serverUrl as string,
-    spaceId: spaceId as string,
-    byCollectionId
-  }
+  const { baseUrl, spaceId } = first
+  return { baseUrl, spaceId, byCollectionId }
 }

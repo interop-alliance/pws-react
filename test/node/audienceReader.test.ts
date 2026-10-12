@@ -88,7 +88,7 @@ beforeAll(async () => {
   })
   ownerDid = ownerAgent.id
   owner = WasClient.fromSigner({
-    serverUrl: audienceServer.serverUrl,
+    serverUrl: `${audienceServer.serverUrl}/spaces/`,
     signer: ownerAgent.getSigner()
   })
   const space = await owner.createSpace({
@@ -128,11 +128,11 @@ async function provisionAudience(): Promise<{
     .space(spaceId)
     .createCollection({ id: collectionId, name: collectionId })
   const target = toUrl({
-    serverUrl,
+    baseUrl: serverUrl,
     path: collectionPath(spaceId, collectionId)
   })
   const spaceRoot = rootCapability({
-    target: toUrl({ serverUrl, path: spacePath(spaceId) }),
+    target: toUrl({ baseUrl: serverUrl, path: spacePath(spaceId) }),
     controller: ownerDid
   })
   const grant = () =>
@@ -200,13 +200,13 @@ describe('AudienceReader.open', () => {
   it('refuses a zcap whose target is not a collection', async () => {
     const serverUrl = audienceServer!.serverUrl
     const spaceZcap = {
-      invocationTarget: toUrl({ serverUrl, path: spacePath(spaceId) })
+      invocationTarget: toUrl({ baseUrl: serverUrl, path: spacePath(spaceId) })
     } as IZcap
     expect(() => AudienceReader.open({ zcap: spaceZcap, signer })).toThrow(
       /must name a collection/
     )
     const resourceZcap = {
-      invocationTarget: `${toUrl({ serverUrl, path: collectionPath(spaceId, 'c') })}r`
+      invocationTarget: `${toUrl({ baseUrl: serverUrl, path: collectionPath(spaceId, 'c') })}r`
     } as IZcap
     expect(() => AudienceReader.open({ zcap: resourceZcap, signer })).toThrow(
       /must name a collection/
@@ -215,7 +215,7 @@ describe('AudienceReader.open', () => {
 
   it('reads a target on a host other than the one the app is granted', async () => {
     const provisioned = await provisionDevGrants({
-      serverUrl: appServerUrl,
+      serverUrl: `${appServerUrl}/spaces/`,
       seed: APP_SEED,
       collections: [{ id: 'posts', visibility: 'public' }]
     })
@@ -223,8 +223,8 @@ describe('AudienceReader.open', () => {
     const { grant, collection } = await provisionAudience()
     await collection.put('p1', { postId: 'post-1', body: 'hello' })
     const reader = AudienceReader.open({ zcap: await grant(), signer })
-    expect(reader.serverUrl).toBe(audienceServer!.serverUrl)
-    expect(reader.serverUrl).not.toBe(appGrants.serverUrl)
+    expect(reader.serverUrl).toBe(`${audienceServer!.serverUrl}/spaces/`)
+    expect(reader.serverUrl).not.toBe(`${appGrants.baseUrl}/spaces/`)
     const { changes } = await reader.pull()
     expect(changes).toEqual([
       { id: 'p1', deleted: false, data: { postId: 'post-1', body: 'hello' } }

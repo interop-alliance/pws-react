@@ -60,7 +60,8 @@ import {
 } from '@interop/was-client'
 import {
   collectionPath,
-  parseAbsoluteSpaceTarget
+  parseAbsoluteSpaceTarget,
+  spacesUrl
 } from '@interop/was-client/paths'
 import { errorStatus } from '@interop/was-client/sync'
 import { log } from '../log.js'
@@ -180,7 +181,7 @@ export class AudienceReader {
     }
     assertAllowsGet(zcap)
     return new AudienceReader({
-      serverUrl: parsed.serverUrl,
+      serverUrl: spacesUrl({ baseUrl: parsed.baseUrl }),
       spaceId: parsed.path.spaceId,
       collectionId: parsed.path.collectionId,
       zcap,

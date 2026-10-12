@@ -57,7 +57,12 @@ import type {
 import { createEdvEncryption } from '@interop/was-client/edv'
 import type { EncryptionDescriptorSource } from '@interop/was-client/edv'
 import { resourceLogStore } from '@interop/was-client/log'
-import { collectionPath, resourcePath, toUrl } from '@interop/was-client/paths'
+import {
+  collectionPath,
+  resourcePath,
+  spacesUrl,
+  toUrl
+} from '@interop/was-client/paths'
 import { errorStatus, errorMessage } from '@interop/was-client/sync'
 import { logGovernedDescriptorSource } from '@interop/wallet-core/descriptors'
 import type { WasCollectionConfig } from '../config.js'
@@ -230,7 +235,6 @@ function declarationFailure(
 
 export class WasRemoteStore {
   public readonly was: WasClient
-  public readonly serverUrl: string
   public readonly spaceId: string
   readonly #byCollectionId: Record<string, IZcap>
   // Per WAS collection id: the effective visibility + declared equality
@@ -258,7 +262,6 @@ export class WasRemoteStore {
     trust: SpaceTrust
   }) {
     this.was = was
-    this.serverUrl = parsed.serverUrl
     this.spaceId = parsed.spaceId
     this.#byCollectionId = parsed.byCollectionId
     this.#configById = configById
@@ -314,7 +317,7 @@ export class WasRemoteStore {
     trust?: SpaceTrust
   }): WasRemoteStore {
     const was = new WasClient({
-      serverUrl: parsed.serverUrl,
+      serverUrl: spacesUrl({ baseUrl: parsed.baseUrl }),
       zcapClient,
       encryption: createEdvEncryption({
         resolveKeys: async () => keys ?? null
@@ -827,7 +830,7 @@ export class WasRemoteStore {
       )
     }
     return toUrl({
-      serverUrl: this.serverUrl,
+      baseUrl: this.was.baseUrl,
       path: resourcePath(this.spaceId, collectionId, id)
     })
   }

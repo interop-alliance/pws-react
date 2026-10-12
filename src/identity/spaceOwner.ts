@@ -37,7 +37,7 @@ import { discoverAccountLog } from '@interop/wallet-core/webvh'
  * session.
  *
  * @param options {object}
- * @param options.serverUrl {string}   the WAS base URL
+ * @param options.baseUrl {string}   the WAS server base URL
  * @param options.spaceId {string}
  * @param [options.pinStore] {ResourceLogPinStore}   this session's chain-head
  *   pins
@@ -45,18 +45,18 @@ import { discoverAccountLog } from '@interop/wallet-core/webvh'
  *   its verified log
  */
 export async function resolveSpaceOwner({
-  serverUrl,
+  baseUrl,
   spaceId,
   pinStore
 }: {
-  serverUrl: string
+  baseUrl: string
   spaceId: string
   pinStore?: ResourceLogPinStore
 }): Promise<{ did: string; log: DIDLog }> {
   try {
     const { did, log } = await discoverAccountLog({
       spaceId,
-      host: serverUrl,
+      host: baseUrl,
       ...(pinStore && { pinStore })
     })
     return { did, log }

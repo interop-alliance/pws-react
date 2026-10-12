@@ -409,9 +409,9 @@ describe('checkGrants', () => {
       controllerDid: appDid,
       collections: TEST_COLLECTION_REQUESTS
     })
-    expect(checked.parsed.serverUrl).toBe(SERVER_URL)
-    expect(checked.parsed.spaceId).toBe('e2e-space')
-    expect(Object.keys(checked.parsed.byCollectionId)).toHaveLength(
+    expect(checked.parsed?.baseUrl).toBe(SERVER_URL)
+    expect(checked.parsed?.spaceId).toBe('e2e-space')
+    expect(Object.keys(checked.parsed!.byCollectionId)).toHaveLength(
       TEST_COLLECTIONS.length
     )
     expect(checked.expires).toBe(soon)
@@ -509,7 +509,7 @@ describe('checkGrants', () => {
       controllerDid: appDid,
       collections: [{ id: 'posts', visibility: 'public' }]
     })
-    expect(Object.keys(checked.parsed.byCollectionId)).toEqual(['posts'])
+    expect(Object.keys(checked.parsed!.byCollectionId)).toEqual(['posts'])
   })
 
   it('rejects a public-collection grant missing a required write action', () => {

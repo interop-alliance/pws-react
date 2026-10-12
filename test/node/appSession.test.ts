@@ -33,7 +33,7 @@ function sessionFixture(expires: string): RestoredAppSession {
   return {
     seed: crypto.getRandomValues(new Uint8Array(32)),
     controllerDid: 'did:key:z6MkTest',
-    serverUrl: 'http://localhost:3999',
+    baseUrl: 'http://localhost:3999',
     spaceId: 'space-1',
     grants: [
       { id: 'urn:zcap:1', invocationTarget: 'http://x/space/space-1/a' }
@@ -80,7 +80,7 @@ describe('persist/restore', () => {
     expect(restored).not.toBeNull()
     expect(restored!.seed).toEqual(session.seed)
     expect(restored!.controllerDid).toBe(session.controllerDid)
-    expect(restored!.serverUrl).toBe(session.serverUrl)
+    expect(restored!.baseUrl).toBe(session.baseUrl)
     expect(restored!.spaceId).toBe(session.spaceId)
     expect(restored!.grants).toEqual(session.grants)
     expect(restored!.expires).toBe(session.expires)

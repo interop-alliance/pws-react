@@ -114,7 +114,7 @@ export interface ProvisionDevGrantsResult {
    */
   spaceId: string
   /**
-   * The canonical absolute space URL (`<serverUrl>/space/<spaceId>/`, with
+   * The canonical absolute space URL (`<baseUrl>/space/<spaceId>/`, with
    * the trailing slash a container URL carries).
    */
   spaceUrl: string
@@ -144,7 +144,8 @@ export interface ProvisionDevGrantsResult {
  * to the app DID derived from `seed`.
  *
  * @param options {object}
- * @param options.serverUrl {string}   base URL of a running was-teaching-server
+ * @param options.serverUrl {string}   the Spaces Repository URL of a running
+ *   was-teaching-server (`http://localhost:3002/spaces/`)
  * @param options.seed {Uint8Array}   the app (requester) master seed; the
  *   app DID the grants are delegated to is derived from it
  * @param options.collections {Array<string | object>}   the WAS collections to
@@ -232,6 +233,9 @@ export async function provisionDevGrants({
   } = agentsFromKeyAgent({ keyAgent })
   const { publicKeyMultibase: keyAgreementKeyMultibase } = clientKeyAgreementKey
   const clientWas = new WasClient({ serverUrl, zcapClient: clientZcapClient })
+  // wallet-core's provisioning helpers and the path builders take the server
+  // base URL, the parent of the Spaces Repository URL the client was given.
+  const baseUrl = clientWas.baseUrl
   // Every run mints a fresh Space, so the update keys are minted per run too
   // and discarded with it: nothing ever appends to this log again.
   const updateKeys = mintClientWebvhUpdateKeys()
@@ -291,7 +295,7 @@ export async function provisionDevGrants({
   // pin.
   const { did } = await ensureDidWebvh({
     idStore: wasWebvhIdStore({ was: clientWas, spaceId, pinStore }),
-    wasServerUrl: serverUrl,
+    wasServerUrl: baseUrl,
     spaceId,
     clientKeys: {
       signingKeyMultibase: clientSigningKeyMultibase({ keyAgent }),
@@ -307,7 +311,7 @@ export async function provisionDevGrants({
   // collection. The blinding key rides along with the first epoch or is
   // never installed at all, so the choice is made here and nowhere later.
   const storeFor = accountCollectionStores({
-    storageServerUrl: serverUrl,
+    storageServerUrl: baseUrl,
     zcapClient: clientZcapClient,
     spaceId,
     did,
@@ -356,7 +360,7 @@ export async function provisionDevGrants({
     serverUrl,
     zcapClient: webvhZcapClient({ keyAgent, did })
   })
-  const spaceUrl = toUrl({ serverUrl, path: spacePath(spaceId) })
+  const spaceUrl = toUrl({ baseUrl, path: spacePath(spaceId) })
   const spaceRoot = rootCapability({ target: spaceUrl, controller: did })
 
   // `Promise.all` preserves input order, so `grants[i]` still corresponds to
@@ -367,7 +371,7 @@ export async function provisionDevGrants({
         to: appDid,
         actions,
         expires,
-        target: toUrl({ serverUrl, path: collectionPath(spaceId, id) }),
+        target: toUrl({ baseUrl, path: collectionPath(spaceId, id) }),
         capability: spaceRoot
       })
       log(`  collection "${id}": created (${visibility}) + delegated RW to app`)

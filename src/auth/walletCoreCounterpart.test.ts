@@ -333,9 +333,9 @@ describe('the credential half, against wallet-core', () => {
       controllerDid: parsed.controllerDid,
       collections: [{ id: 'notes' }]
     })
-    expect(checked.parsed.serverUrl).toBe('https://was.example')
-    expect(checked.parsed.spaceId).toBe('s1')
-    expect(checked.parsed.byCollectionId['notes']).toEqual(grant)
+    expect(checked.parsed?.baseUrl).toBe('https://was.example')
+    expect(checked.parsed?.spaceId).toBe('s1')
+    expect(checked.parsed?.byCollectionId['notes']).toEqual(grant)
     // The clamped expiry is what the session runs on, short of the TTL the
     // app would have asked for.
     expect(checked.expires).toBe(grantExpires)

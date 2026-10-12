@@ -168,7 +168,12 @@ export function grantsOf(presentation: IVerifiablePresentation): IZcap[] {
  * A validated grant set: parsed topology plus the earliest expiry.
  */
 export interface CheckedGrants {
-  parsed: ParsedGrants
+  /**
+   * The storage topology the grants name. Absent for a grant-less login (an
+   * app requesting no collections, or a shared-only app whose user declined
+   * every share): such a session names no server and no Space.
+   */
+  parsed?: ParsedGrants
   grants: IZcap[]
   /**
    * ISO timestamp: the earliest expiry across the grants.
@@ -225,9 +230,10 @@ export function checkGrants({
     }
   }
 
-  // Asserts a single server origin + single space across all grants and
-  // builds the per-collection routing table. The wallet decides where the
-  // user's Space lives; the sync layer derives its target from the grants.
+  // Asserts a single server (base URL, sub-path mount included) and a single
+  // space across all grants, and builds the per-collection routing table. The
+  // wallet decides where the user's Space lives; the sync layer derives its
+  // target from the grants.
   const parsed = parseGrants(grants)
 
   for (const { id, visibility } of collections) {

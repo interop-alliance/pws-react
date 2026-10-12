@@ -42,15 +42,16 @@ export interface SpaceTrust {
  * Creates the trust state for one Space.
  *
  * @param options {object}
- * @param options.serverUrl {string}   the WAS base URL
+ * @param options.baseUrl {string}   the WAS server's base URL
+ *   (`ParsedGrants.baseUrl`); the owner's log is read beneath it
  * @param options.spaceId {string}
  * @returns {SpaceTrust}
  */
 export function createSpaceTrust({
-  serverUrl,
+  baseUrl,
   spaceId
 }: {
-  serverUrl: string
+  baseUrl: string
   spaceId: string
 }): SpaceTrust {
   let resolved: Promise<WebvhResourceLogController> | undefined
@@ -63,7 +64,7 @@ export function createSpaceTrust({
     owner() {
       const owner =
         resolved ??
-        resolveSpaceOwner({ serverUrl, spaceId, pinStore }).then(
+        resolveSpaceOwner({ baseUrl, spaceId, pinStore }).then(
           webvhResourceLogController
         )
       resolved = owner

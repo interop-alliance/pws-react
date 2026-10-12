@@ -98,7 +98,7 @@ beforeAll(async () => {
   const { serverUrl } = server
 
   const provisioned = await provisionDevGrants({
-    serverUrl,
+    serverUrl: `${serverUrl}/spaces/`,
     seed: SEED,
     collections: [{ id: PRIVATE_ID, visibility: 'private' }]
   })

@@ -1,5 +1,37 @@
 # @interop/was-react Changelog
 
+## 0.30.0 - TBD
+
+### Changed
+
+- Follow `@interop/was-client` 0.97.0, whose `WasClient` takes the server's
+  Spaces Repository URL (`<base>/spaces/`) as `serverUrl`. `ParsedGrants` now
+  carries the server's base URL as `baseUrl` (read off the grant targets,
+  sub-path mount included) in place of `serverUrl`; the remote store builds its
+  client over `spacesUrl({ baseUrl })`. Service discovery starts from that URL,
+  which the WAS server itself answers, so a bare origin whose root is served by
+  another application (a wallet's pages, say) no longer fails login with
+  "carries no rel=service link". `createSpaceTrust` and `resolveSpaceOwner` take
+  `baseUrl`, and `provisionDevGrants` takes the Spaces Repository URL as
+  `serverUrl`.
+- The persisted session record's `serverUrl` field is renamed `baseUrl` and
+  holds the server's base URL. A record under the old shape fails the structural
+  check and is dropped, so the next load falls through to a returning login.
+- `CheckedGrants.parsed` and `LoginOutcome.parsed` are optional, absent for a
+  grant-less login (an app requesting no collections, or a shared-only app whose
+  user declined every share) in place of the former empty-string topology.
+- `WasRemoteStore.serverUrl` is removed; read `was.serverUrl` or `was.baseUrl`
+  off the store's client.
+- Requires `@interop/was-sync` 0.10.0, whose controller port names the
+  replication-identifier input `baseUrl`.
+
+### Fixed
+
+- A login that returns no grants lands `connected` again instead of failing its
+  activation: the session persists no record, starts no replication, and builds
+  no remote store, since there is no server to point them at. A reload of such a
+  session lands in `local`, as before.
+
 ## 0.29.0 - 2026-10-11
 
 ### Changed

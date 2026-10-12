@@ -28,7 +28,7 @@ vi.mock('@interop/wallet-core/descriptors', async importOriginal => {
 vi.mock('../identity/spaceOwner.js', () => ({ resolveSpaceOwner: vi.fn() }))
 
 const parsed: ParsedGrants = {
-  serverUrl: 'https://was.example',
+  baseUrl: 'https://was.example',
   spaceId: 'space-1',
   byCollectionId: {
     'microblog-posts': { id: 'urn:zcap:pub' } as unknown as IZcap,

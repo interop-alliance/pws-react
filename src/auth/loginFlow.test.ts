@@ -186,7 +186,7 @@ describe('loginWithWallet (App Connect)', () => {
     expect(outcome.firstRun).toBe(false)
     expect(outcome.identity.controllerDid).toBe(appDid)
     expect(outcome.seed).toEqual(appSeed)
-    expect(Object.keys(outcome.parsed.byCollectionId)).toEqual(
+    expect(Object.keys(outcome.parsed!.byCollectionId)).toEqual(
       COLLECTIONS.map(collection => collection.id)
     )
     expect(typeof outcome.expires).toBe('string')
@@ -259,11 +259,7 @@ describe('App Connect grant checking', () => {
 
     expect(outcome.identity.controllerDid).toBe(appDid)
     expect(outcome.grants).toEqual([])
-    expect(outcome.parsed).toEqual({
-      serverUrl: '',
-      spaceId: '',
-      byCollectionId: {}
-    })
+    expect(outcome.parsed).toBeUndefined()
     // A nominal far-future expiry, so the near-expiry watch never fires.
     expect(new Date(outcome.expires).getTime()).toBeGreaterThan(Date.now())
     expect(
@@ -355,7 +351,7 @@ describe('App Connect grant checking', () => {
       }
     })
 
-    expect(Object.keys(outcome.parsed.byCollectionId).sort()).toEqual([
+    expect(Object.keys(outcome.parsed!.byCollectionId).sort()).toEqual([
       'microblog-posts',
       'notes'
     ])
@@ -377,6 +373,6 @@ describe('App Connect grant checking', () => {
     })
 
     expect(outcome.grants).toHaveLength(COLLECTIONS.length)
-    expect(outcome.parsed.spaceId).toBe('e2e-space')
+    expect(outcome.parsed!.spaceId).toBe('e2e-space')
   })
 })

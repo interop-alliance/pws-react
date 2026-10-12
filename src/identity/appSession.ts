@@ -8,7 +8,8 @@
  * persisted -- the wallet remains the recovery source of truth, this is only
  * the hot cache.
  *
- * Record: `{ seed, controllerDid, serverUrl, spaceId, grants, expires }`.
+ * Record: `{ seed, controllerDid, baseUrl, spaceId, grants, expires }`.
+ * `baseUrl` is the WAS server's base URL (`ParsedGrants.baseUrl`).
  * `expires` is the earliest `expires` across the granted zcaps; a record past
  * it is cleared on load and the caller falls through to the returning-login
  * flow (same seed comes back from the wallet, same DID, same vault keys).
@@ -20,7 +21,7 @@ import type { SeedStore } from './seedStore.js'
 
 export interface AppSessionRecord {
   controllerDid: string
-  serverUrl: string
+  baseUrl: string
   spaceId: string
   grants: IZcap[]
   /**
@@ -125,7 +126,7 @@ function isAppSessionRecord(stored: unknown): stored is AppSessionRecord {
   return (
     !!record &&
     typeof record.controllerDid === 'string' &&
-    typeof record.serverUrl === 'string' &&
+    typeof record.baseUrl === 'string' &&
     typeof record.spaceId === 'string' &&
     Array.isArray(record.grants) &&
     record.grants.length > 0 &&

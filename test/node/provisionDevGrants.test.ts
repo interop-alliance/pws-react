@@ -54,7 +54,7 @@ async function describeAsOwner({
     keyName: 'provisioner-key'
   })
   const owner = new WasClient({
-    serverUrl: server!.serverUrl,
+    serverUrl: `${server!.serverUrl}/spaces/`,
     zcapClient: webvhZcapClient({ keyAgent, did })
   })
   return await owner.space(spaceId).describe()
@@ -63,7 +63,7 @@ async function describeAsOwner({
 describe('provisionDevGrants', () => {
   it('promotes the Space to the did:webvh under the default name', async () => {
     const provisioned = await provisionDevGrants({
-      serverUrl: server!.serverUrl,
+      serverUrl: `${server!.serverUrl}/spaces/`,
       seed: SEED,
       collections: ['notes']
     })
@@ -77,7 +77,7 @@ describe('provisionDevGrants', () => {
 
   it('keeps a configured Space name through the promotion', async () => {
     const provisioned = await provisionDevGrants({
-      serverUrl: server!.serverUrl,
+      serverUrl: `${server!.serverUrl}/spaces/`,
       seed: SEED,
       collections: ['notes'],
       spaceName: 'Named Otherwise'
@@ -93,7 +93,7 @@ describe('provisionDevGrants', () => {
   it("mints grants that live DEV_GRANT_TTL_MS, not ezcap's five minutes", async () => {
     const before = Date.now()
     const provisioned = await provisionDevGrants({
-      serverUrl: server!.serverUrl,
+      serverUrl: `${server!.serverUrl}/spaces/`,
       seed: SEED,
       collections: ['notes']
     })
@@ -106,7 +106,7 @@ describe('provisionDevGrants', () => {
   it('honors a caller-supplied expiry', async () => {
     const expires = new Date(Date.now() + 60 * 60 * 1000)
     const provisioned = await provisionDevGrants({
-      serverUrl: server!.serverUrl,
+      serverUrl: `${server!.serverUrl}/spaces/`,
       seed: SEED,
       collections: ['notes'],
       expires

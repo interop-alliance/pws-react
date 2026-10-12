@@ -107,7 +107,7 @@ export type SessionStatus = 'boot' | 'local' | 'connected' | 'reconnect'
  * Space trust state and the descriptors the connected replica opens with.
  */
 interface PreparedActivation {
-  trust: SpaceTrust
+  trust?: SpaceTrust
   descriptors?: Record<string, CollectionEncryption>
   fresh: Record<string, CollectionEncryption>
 }
@@ -503,7 +503,8 @@ export function createAuthStore({
    * @param options {object}
    * @param options.seed {Uint8Array}
    * @param options.identity {IdentityAgents}
-   * @param options.parsed {ParsedGrants}
+   * @param [options.parsed] {ParsedGrants}   the storage topology; absent for
+   *   a grant-less session, which persists nothing and replicates nothing
    * @param options.grants {IZcap[]}
    * @param options.expires {string}
    * @param [options.knownDescriptors] {Record<string, CollectionEncryption>}
@@ -524,17 +525,25 @@ export function createAuthStore({
   }: {
     seed: Uint8Array
     identity: IdentityAgents
-    parsed: ParsedGrants
+    parsed?: ParsedGrants
     grants: IZcap[]
     expires: string
     knownDescriptors?: Record<string, CollectionEncryption>
     trust?: SpaceTrust
   }): Promise<void> {
+    // A grant-less session (an app requesting no collections, or a shared-only
+    // app whose user declined every share) names no server and no Space:
+    // nothing replicates, there is no remote store to build, and nothing is
+    // persisted, since the session record carries a storage location and a
+    // non-empty grant set. A reload lands in `local`.
+    if (parsed === undefined) {
+      return
+    }
     await persistAppSession({
       session: {
         seed,
         controllerDid: identity.controllerDid,
-        serverUrl: parsed.serverUrl,
+        baseUrl: parsed.baseUrl,
         spaceId: parsed.spaceId,
         grants,
         expires
@@ -726,22 +735,28 @@ export function createAuthStore({
    * swap.
    *
    * @param session {object}   the connecting identity and its parsed grants
+   * @param [session.parsed] {ParsedGrants}   absent for a grant-less session,
+   *   which has no Space to trust and no descriptors to read
    * @param [session.restore] {boolean}   a hot restore rather than a login: a
    *   descriptor read that fails degrades that collection instead of rejecting
    * @returns {Promise<PreparedActivation>}
    */
   async function prepareActivation(session: {
     identity: IdentityAgents
-    parsed: ParsedGrants
+    parsed?: ParsedGrants
     restore?: boolean
   }): Promise<PreparedActivation> {
-    const trust = createSpaceTrust(session.parsed)
+    const { parsed } = session
+    if (parsed === undefined) {
+      return { fresh: {} }
+    }
+    const trust = createSpaceTrust(parsed)
     const { descriptors, fresh } = await descriptorManager.completeDescriptors({
       cached: await descriptorManager.loadCachedDescriptors({
         controllerDid: session.identity.controllerDid
       }),
       identity: session.identity,
-      parsed: session.parsed,
+      parsed,
       onReadFailure: session.restore ? 'skip' : 'reject',
       trust
     })
@@ -766,7 +781,7 @@ export function createAuthStore({
   async function activateConnected(session: {
     seed: Uint8Array
     identity: IdentityAgents
-    parsed: ParsedGrants
+    parsed?: ParsedGrants
     grants: IZcap[]
     expires: string
     adopt?: AdoptSource
@@ -784,11 +799,11 @@ export function createAuthStore({
       await persistAndStartSync({
         seed: session.seed,
         identity: session.identity,
-        parsed: session.parsed,
+        ...(session.parsed && { parsed: session.parsed }),
         grants: session.grants,
         expires: session.expires,
         knownDescriptors: fresh,
-        trust
+        ...(trust && { trust })
       })
     } catch (err) {
       await deactivateStore()
@@ -1057,7 +1072,7 @@ export function createAuthStore({
    * @param options {object}
    * @param options.seed {Uint8Array}
    * @param options.identity {IdentityAgents}
-   * @param options.parsed {ParsedGrants}
+   * @param [options.parsed] {ParsedGrants}   absent for a grant-less login
    * @param options.grants {IZcap[]}
    * @param options.expires {string}
    * @param options.adopt {'merge' | 'leave'}
@@ -1076,7 +1091,7 @@ export function createAuthStore({
   }: {
     seed: Uint8Array
     identity: IdentityAgents
-    parsed: ParsedGrants
+    parsed?: ParsedGrants
     grants: IZcap[]
     expires: string
     adopt: 'merge' | 'leave'
@@ -1084,7 +1099,10 @@ export function createAuthStore({
   }): Promise<void> {
     // The network half first, with the anonymous replica still attached: a
     // failed owner-log or descriptor read rejects here with nothing to undo.
-    const prepared = await prepareActivation({ identity, parsed })
+    const prepared = await prepareActivation({
+      identity,
+      ...(parsed && { parsed })
+    })
     // The replica swap: writes that arrive while no replica is attached wait
     // on it and land in the connected replica (or, on a failed activation, in
     // the re-opened anonymous one) once it is attached and hydrated. Only a
@@ -1102,7 +1120,7 @@ export function createAuthStore({
       await activateConnected({
         seed,
         identity,
-        parsed,
+        ...(parsed && { parsed }),
         grants,
         expires,
         prepared,
@@ -1249,7 +1267,7 @@ export function createAuthStore({
             completeConnect({
               seed: outcome.seed,
               identity: outcome.identity,
-              parsed: outcome.parsed,
+              ...(outcome.parsed && { parsed: outcome.parsed }),
               grants: outcome.grants,
               expires: outcome.expires,
               adopt,
@@ -1350,14 +1368,15 @@ export function createAuthStore({
           // storage is a logout + fresh login, an explicit user action.
           if (
             record !== null &&
-            (checked.parsed.serverUrl !== record.serverUrl ||
+            checked.parsed !== undefined &&
+            (checked.parsed.baseUrl !== record.baseUrl ||
               checked.parsed.spaceId !== record.spaceId)
           ) {
             throw new Error(
               `The renewed grants point at a different storage location ` +
-                `("${checked.parsed.serverUrl}", space ` +
+                `("${checked.parsed.baseUrl}", space ` +
                 `"${checked.parsed.spaceId}") than this session's ` +
-                `("${record.serverUrl}", space "${record.spaceId}"). ` +
+                `("${record.baseUrl}", space "${record.spaceId}"). ` +
                 `Refusing to re-point the session; log out and log in again ` +
                 `to switch storage.`
             )
@@ -1366,7 +1385,7 @@ export function createAuthStore({
           await persistAndStartSync({
             seed,
             identity,
-            parsed: checked.parsed,
+            ...(checked.parsed && { parsed: checked.parsed }),
             grants: checked.grants,
             expires: checked.expires
           })

@@ -170,7 +170,9 @@ export class SyncController {
       port: {
         wasClient: remoteStore.was,
         spaceId: remoteStore.spaceId,
-        serverUrl: remoteStore.serverUrl,
+        // Read only for the replication identifier RxDB keys its persisted
+        // pull checkpoint on; changing its shape orphans every checkpoint.
+        baseUrl: remoteStore.was.baseUrl,
         collections: covered,
         rxCollection: key => localStore.rxCollection(key),
         // The 412 conflict re-read resolves the primary state (the server's

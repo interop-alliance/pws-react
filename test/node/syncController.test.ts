@@ -46,8 +46,10 @@ function fakeRemoteStore(capabilityFor: (id: string) => object | undefined): {
   const remoteStore = {
     // The sync port binds its `changes` feed handle at construction, so the
     // fake client has to answer `space().collection()`; nothing here is called.
-    was: { space: () => ({ collection: () => ({}) }) },
-    serverUrl: 'http://localhost:3999',
+    was: {
+      space: () => ({ collection: () => ({}) }),
+      baseUrl: 'http://localhost:3999'
+    },
     spaceId: 'space-1',
     collectionCapability
   } as unknown as WasRemoteStore

@@ -243,7 +243,7 @@ describe('serialized boot/destroy lifecycle', () => {
       session: {
         seed,
         controllerDid: identity.controllerDid,
-        serverUrl: 'http://localhost:3999',
+        baseUrl: 'http://localhost:3999',
         spaceId: 'space-1',
         grants: [
           {

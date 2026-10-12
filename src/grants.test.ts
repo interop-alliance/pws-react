@@ -27,7 +27,7 @@ describe('parseInvocationTarget', () => {
       'http://localhost:3002/space/abc123/action-items'
     )
     expect(parsed).toEqual({
-      serverUrl: 'http://localhost:3002',
+      baseUrl: 'http://localhost:3002',
       spaceId: 'abc123',
       collectionId: 'action-items'
     })
@@ -35,7 +35,7 @@ describe('parseInvocationTarget', () => {
 
   it('tolerates a trailing slash on a collection target', () => {
     const parsed = parseInvocationTarget('https://was.example/space/s1/notes/')
-    expect(parsed.serverUrl).toBe('https://was.example')
+    expect(parsed.baseUrl).toBe('https://was.example')
     expect(parsed.spaceId).toBe('s1')
     expect(parsed.collectionId).toBe('notes')
   })
@@ -62,7 +62,7 @@ describe('parseGrants', () => {
       grant('http://localhost:3002/space/abc/projects'),
       grant('http://localhost:3002/space/abc/current-focus')
     ])
-    expect(parsed.serverUrl).toBe('http://localhost:3002')
+    expect(parsed.baseUrl).toBe('http://localhost:3002')
     expect(parsed.spaceId).toBe('abc')
     expect(Object.keys(parsed.byCollectionId).sort()).toEqual([
       'action-items',

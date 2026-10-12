@@ -446,13 +446,15 @@ app requested is covered with the actions it requires.
 `checkGrantsForCollections` (`src/auth/loginFlow.ts`) wraps it with one skip:
 when the configured app-owned `collections` list is empty AND the response
 carries no grants, `checkGrants` -- which rejects an empty grant set -- is
-skipped, and an empty grant set with a far-future expiry is returned instead.
-That covers both the app that requests nothing at all and the shared-only app
-(`collections: []` plus some `sharedCollections`) whose user declined every
-share; the declined shares are warned about, and the readers are simply not
-opened. Shared collections are never passed to `checkGrants`: a declined share
-is not a login failure. They still reach the routing table through
-`parseGrants`.
+skipped, and an empty grant set with a far-future expiry and no `parsed`
+topology is returned instead. That covers both the app that requests nothing at
+all and the shared-only app (`collections: []` plus some `sharedCollections`)
+whose user declined every share; the declined shares are warned about, and the
+readers are simply not opened. Such a session names no server and no Space, so
+the auth store persists no session record for it, resolves no Space owner, and
+starts no replication; a reload lands in `local`. Shared collections are never
+passed to `checkGrants`: a declined share is not a login failure. They still
+reach the routing table through `parseGrants`.
 
 That check is structural. `controller` must equal the app's own DID,
 `invocationTarget` must name exactly one collection, and `expires` must be in
