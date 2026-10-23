@@ -91,7 +91,7 @@ export async function verifyLoginPresentation({
       ...result.credentialResults.flatMap(c => c.results)
     ].flatMap(check =>
       check.outcome.status === 'failure'
-        ? [{ check: check.check, problems: check.outcome.problems }]
+        ? [{ check: check.id, problems: check.outcome.problems }]
         : []
     )
     // The thrown message surfaces in the login UI; the per-check problem
