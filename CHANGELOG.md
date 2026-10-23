@@ -1,5 +1,16 @@
 # @interop/was-react Changelog
 
+## 0.31.0 - TBD
+
+### Fixed
+
+- `reconnect()` runs its post-popup epilogue (controller stop, record persist,
+  sync restart, `connected` transition) on the lifecycle chain and re-checks the
+  session first. A `logout`, `clearLocalData`, or `destroy` completed while the
+  re-grant popup was open is no longer undone when the popup answers: the
+  renewed grants are discarded with a warning, nothing is persisted, and no sync
+  or expiry watch starts over the torn-down session.
+
 ## 0.30.0 - 2026-10-12
 
 ### Changed

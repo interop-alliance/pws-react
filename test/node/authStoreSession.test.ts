@@ -433,3 +433,99 @@ describe('destroy()', () => {
     expect(store.getState().status).toBe('connected')
   })
 })
+
+describe('reconnect() with the session torn down while the popup is open', () => {
+  /**
+   * Drives a connected store to `reconnect`, parks the re-grant popup, and
+   * hands back the release handle plus the in-flight `reconnect()` promise.
+   */
+  async function parkedReconnect() {
+    const config = baseConfig([{ key: 'notes', id: 'notes' }])
+    const seedStore = newSeedStore()
+    const { store } = await connectedStore({ config, seedStore })
+    store.getState().notifyAccessExpired()
+    expect(store.getState().status).toBe('reconnect')
+    const syncStartsBefore = startWasSyncMock.mock.calls.length
+
+    let release!: () => void
+    const popup = new Promise<void>(resolve => (release = resolve))
+    requestGrantsMock.mockImplementation(async () => {
+      await popup
+      const grants = noteGrants()
+      return {
+        grants,
+        parsed: parseGrants(grants),
+        expires: futureIso(FAR_FUTURE_MS)
+      }
+    })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const pending = store.getState().reconnect()
+    // Let `reconnect` reach the awaited popup.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(store.getState().reconnecting).toBe(true)
+    return { store, seedStore, pending, release, syncStartsBefore }
+  }
+
+  it('a logout completed meanwhile leaves local with no session record', async () => {
+    const { store, seedStore, pending, release, syncStartsBefore } =
+      await parkedReconnect()
+
+    await store.getState().logout()
+    expect(store.getState().status).toBe('local')
+    const anonDid = store.getState().controllerDid
+
+    release()
+    await pending
+
+    // The renewed grants were discarded: no record written back, no sync
+    // started over the anonymous replica, and the anonymous session intact.
+    expect(store.getState().status).toBe('local')
+    expect(store.getState().controllerDid).toBe(anonDid)
+    expect(store.getState().reconnecting).toBe(false)
+    expect(store.getState().error).toBeNull()
+    expect(await restoreAppSession({ store: seedStore })).toBeNull()
+    expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore)
+    expect(hasStore()).toBe(true)
+  })
+
+  it('a clear-data completed meanwhile leaves local with no session record', async () => {
+    const { store, seedStore, pending, release, syncStartsBefore } =
+      await parkedReconnect()
+
+    await store.getState().clearLocalData()
+    expect(store.getState().status).toBe('local')
+    const anonDid = store.getState().controllerDid
+
+    release()
+    await pending
+
+    expect(store.getState().status).toBe('local')
+    expect(store.getState().controllerDid).toBe(anonDid)
+    expect(store.getState().reconnecting).toBe(false)
+    expect(await seedStore.loadSeed()).toBeNull()
+    expect(await restoreAppSession({ store: seedStore })).toBeNull()
+    expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore)
+    expect(hasStore()).toBe(true)
+  })
+
+  it('a destroy completed meanwhile arms no expiry watch and starts no sync', async () => {
+    const { store, pending, release, syncStartsBefore } =
+      await parkedReconnect()
+
+    await store.getState().destroy()
+    expect(store.getState().status).toBe('boot')
+    const intervals = vi.spyOn(globalThis, 'setInterval')
+
+    release()
+    await pending
+
+    // The discarded store stays torn down: nothing re-armed the watch, no
+    // controller was started, and no replica was re-opened.
+    expect(store.getState().status).toBe('boot')
+    expect(store.getState().reconnecting).toBe(false)
+    expect(intervals).not.toHaveBeenCalled()
+    expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore)
+    expect(hasStore()).toBe(false)
+  })
+})

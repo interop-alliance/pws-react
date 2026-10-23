@@ -395,8 +395,9 @@ export function createAuthStore({
   // in-flight boot's bring-up would race two open/teardown sequences (see the
   // comment at `logout`). `login` and `reconnect` keep their CHAPI popup
   // await off it: chaining that would hold boots and destroys hostage to
-  // user interaction. `login`'s connect epilogue (the replica swap) rides
-  // the chain once the popup has answered.
+  // user interaction. `login`'s connect epilogue (the replica swap) and
+  // `reconnect`'s (the re-grant persist and sync restart) ride the chain once
+  // the popup has answered.
   let lifecycle: Promise<void> = Promise.resolve()
   function serializeLifecycle<T>(task: () => Promise<T>): Promise<T> {
     const run = lifecycle.then(task, task)
@@ -1339,7 +1340,7 @@ export function createAuthStore({
       },
 
       reconnect: async () => {
-        const { reconnecting, status } = get()
+        const { reconnecting, status, controllerDid: startDid } = get()
         if (reconnecting || status !== 'reconnect') {
           return
         }
@@ -1381,18 +1382,37 @@ export function createAuthStore({
                 `to switch storage.`
             )
           }
-          await stopController()
-          await persistAndStartSync({
-            seed,
-            identity,
-            ...(checked.parsed && { parsed: checked.parsed }),
-            grants: checked.grants,
-            expires: checked.expires
-          })
-          set({
-            status: 'connected',
-            expires: checked.expires,
-            reconnecting: false
+          // The popup await above is off the lifecycle chain, so a `logout`,
+          // `clearLocalData`, or `destroy` can complete while it is open. The
+          // epilogue rides the chain (as `login`'s does) and re-checks the
+          // session it is about to renew: persisting the record over a
+          // completed logout would undo it, and `beginSync` would replicate
+          // whatever replica is attached by then (the anonymous one) into the
+          // user's Space under the wallet's zcaps.
+          await serializeLifecycle(async () => {
+            const { status, controllerDid } = get()
+            if (status !== 'reconnect' || controllerDid !== startDid) {
+              log.warn(
+                'Discarding the renewed grants: the session left reconnect ' +
+                  'while the wallet popup was open',
+                { status, controllerDid, startDid }
+              )
+              set({ reconnecting: false })
+              return
+            }
+            await stopController()
+            await persistAndStartSync({
+              seed,
+              identity,
+              ...(checked.parsed && { parsed: checked.parsed }),
+              grants: checked.grants,
+              expires: checked.expires
+            })
+            set({
+              status: 'connected',
+              expires: checked.expires,
+              reconnecting: false
+            })
           })
         } catch (err) {
           set({ reconnecting: false, error: errorMessage(err) })

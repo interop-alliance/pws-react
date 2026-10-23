@@ -249,6 +249,15 @@ queued meanwhile runs to completion first rather than tearing the swap apart.
 `connectWithGrants` is a no-op while a Login With Wallet flow is in flight
 (`phase` is non-null), for the mirror case.
 
+`reconnect` follows the same split. Its re-grant popup await is off the chain,
+and its epilogue (stopping the controller, persisting the renewed record,
+restarting sync, the `connected` transition) rides it. The epilogue re-checks
+the session first and bails with a warning unless the status is still
+`reconnect` for the same `controllerDid` it started with. A logout, clear-data,
+or destroy that completed while the popup was open therefore stands: the record
+is not written back over it, no sync starts over the replica attached by then,
+and no expiry watch is armed on a torn-down store.
+
 ### `writerId`
 
 The per-install LWW attribution label, resolved once at store creation from
