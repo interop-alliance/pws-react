@@ -702,19 +702,31 @@ describe('LocalStore public (plaintext) collections', () => {
     ).rejects.toSatisfy(isIntegrityError)
   })
 
-  it('refuses to read an EDV envelope out of a public collection', async () => {
+  it('skips an EDV envelope stored in a public collection, and hydrates the rest', async () => {
     const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
-    // Simulate a visibility misconfiguration: a ciphertext row (e.g. written
-    // while the collection was private) sitting in a now-public collection.
+    const post = makeNote('Well-formed post')
+    await store.insertEntity(PUBLIC_COLLECTION, post)
+    // A ciphertext row in a plaintext collection: a visibility
+    // misconfiguration, or any grant holder writing `{ id, jwe }` there. Its
+    // body is unchanged on every retry, so it must cost one row, not every
+    // hydrate of the collection.
+    const stray = { id: 'stray-envelope', jwe: {} }
     await store.rxCollection(PUBLIC_COLLECTION).insert({
-      id: 'stray-envelope',
+      id: stray.id,
       updatedAt: new Date().toISOString(),
-      data: { id: 'stray-envelope', sequence: 0, jwe: { protected: 'x' } }
+      data: stray
     })
 
+    expect(await store.listEntities<NoteDoc>(PUBLIC_COLLECTION)).toEqual([post])
+    // The raw decrypt path still refuses it, as the same integrity failure a
+    // mis-bound id is.
     await expect(
-      store.listEntities<NoteDoc>(PUBLIC_COLLECTION)
-    ).rejects.toThrow(/public \(plaintext\)/)
+      store.decryptEnvelope({
+        key: PUBLIC_COLLECTION,
+        id: stray.id,
+        envelope: stray
+      })
+    ).rejects.toSatisfy(isIntegrityError)
   })
 
   it('rejects a registry mapping one WAS id to both visibilities', async () => {
@@ -835,6 +847,32 @@ describe('LocalStore LWW conflict-handler decrypt closure', () => {
 
     // The well-formed local edit is the later one, so it wins and is re-pushed
     // over the malformed remote body.
+    expect(resolved.data).toEqual(localRow.data)
+  })
+
+  it('settles a public collection conflict when the remote side is an EDV envelope', async () => {
+    const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
+    const post = makeNote('Well-formed post')
+    await store.insertEntity(PUBLIC_COLLECTION, post)
+    const localRow = (await store
+      .rxCollection(PUBLIC_COLLECTION)
+      .findOne(post.id)
+      .exec())!.toMutableJSON()
+
+    // `{ id, jwe }` under this resource id, written by another grant holder.
+    // The body carries no stamp at all, so the stamped local edit wins; what
+    // matters is that resolution settles rather than failing the cycle, since
+    // the server's body is the same on every retry.
+    const envelopeSide = { ...localRow, data: { id: post.id, jwe: {} } }
+
+    const handler = store.rxCollection(PUBLIC_COLLECTION).conflictHandler
+    const resolved = await handler.resolve(
+      {
+        realMasterState: { ...envelopeSide, _deleted: false },
+        newDocumentState: { ...localRow, _deleted: false }
+      },
+      'test'
+    )
     expect(resolved.data).toEqual(localRow.data)
   })
 })

@@ -787,15 +787,17 @@ A public collection's pass-through codec (`createPlaintextDocCodec` in
 `docCipher.ts`) checks the same binding: the row id IS the payload's own `id`
 (see "The three kinds of collection" above), so a body read under a resource id
 that does not match its own `id` field raises `IntegrityError` there too, and so
-does a body carrying no string `id` at all. Both paths over a public collection
-treat that leniently, because a public collection takes writes from anything
-holding a grant on it and the binding there is a data-consistency check on a
-plaintext body, not a seal. Hydration skips such a row with a warning and
-hydrates the rest. The conflict handler warns and hands the malformed body back
-for comparison, so the side is settled on the last-write-wins stamp it still
-carries; failing the cycle instead would break that collection's replication
-permanently, since the server's body is unchanged on every retry. A private
-collection's `IntegrityError` propagates out of both paths unchanged.
+does a body carrying no string `id` at all, and so does an EDV envelope (a body
+with an object `jwe` member) stored in the plaintext collection. Both paths over
+a public collection treat all of those leniently, because a public collection
+takes writes from anything holding a grant on it and the binding there is a
+data-consistency check on a plaintext body, not a seal. Hydration skips such a
+row with a warning and hydrates the rest. The conflict handler warns and hands
+the malformed body back for comparison, so the side is settled on the
+last-write-wins stamp it still carries; failing the cycle instead would break
+that collection's replication permanently, since the server's body is unchanged
+on every retry. A private collection's `IntegrityError` propagates out of both
+paths unchanged.
 
 `startWasSync` (`src/storage/wasSync.ts`) is the replication bootstrap: given
 the parsed grant set and the invoking `ZcapClient` it builds the delegated

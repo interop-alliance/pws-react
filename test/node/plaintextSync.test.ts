@@ -92,6 +92,7 @@ let serverUrl: string
 let parsed: ParsedGrants
 let zcapClient: ZcapClient
 const controllers: SyncController[] = []
+const statusStores: ReturnType<typeof createSyncStatusStore>[] = []
 const stores: LocalStore[] = []
 let remoteStore: WasRemoteStore
 
@@ -143,9 +144,11 @@ async function openSyncedReplica(dbName: string): Promise<LocalStore> {
     dbName
   })
   stores.push(store)
+  const syncStatus = createSyncStatusStore()
+  statusStores.push(syncStatus)
   const controller = new SyncController({
     collections: REGISTRY,
-    syncStatus: createSyncStatusStore(),
+    syncStatus,
     sync: { pollMs: 500, retryMs: 500 }
   })
   controllers.push(controller)
@@ -266,6 +269,40 @@ describe('plaintext-collection sync against was-teaching-server', () => {
       return listed.length > 0 ? listed : null
     }, 'the private note to be pulled')
     expect(pulledNotes).toEqual([note])
+  }, 60000)
+
+  it('keeps replicating a public collection that holds an EDV envelope row', async () => {
+    // What any grant holder can write to a public collection: a body whose
+    // only members are `id` and an object `jwe`. Written straight to the
+    // server, as a foreign client would, so it arrives through the pull path.
+    const strayId = 'stray-envelope'
+    await remoteStore.was.request({
+      capability: remoteStore.collectionCapability(PUBLIC_ID),
+      path: `/space/${remoteStore.spaceId}/${PUBLIC_ID}/${strayId}`,
+      method: 'PUT',
+      json: { id: strayId, jwe: {} }
+    })
+
+    const replica = await openSyncedReplica('plaintext-sync-c')
+    const syncStatus = statusStores.at(-1)!
+    const pulledPosts = await waitFor(async () => {
+      const listed = await replica.listEntities<PostDoc>('posts')
+      return listed.length > 0 ? listed : null
+    }, 'the public post to be pulled beside the stray envelope')
+    // The well-formed post hydrates; the envelope row is skipped, not fatal.
+    expect(pulledPosts).toEqual([post])
+    const strayRow = await waitFor(
+      async () => replica.rxCollection('posts').findOne(strayId).exec(),
+      'the stray envelope row to be pulled'
+    )
+    expect(strayRow.toMutableJSON().data).toEqual({ id: strayId, jwe: {} })
+    expect(await replica.listEntities<PostDoc>('posts')).toEqual([post])
+    // And the collection's replication cycle completed over it.
+    const status = await waitFor(async () => {
+      const current = syncStatus.getState().statuses['posts']
+      return current === 'synced' ? current : null
+    }, 'the public collection to report synced')
+    expect(status).toBe('synced')
   }, 60000)
 
   it('composes a share URL an anonymous reader can fetch, and unshares', async () => {

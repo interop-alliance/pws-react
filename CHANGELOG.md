@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- A public (plaintext) collection row whose body is an EDV envelope (an object
+  `jwe` member) no longer breaks the collection. The plaintext codec raises it
+  as `IntegrityError`, the same failure a mis-bound payload id is, so hydration
+  skips the row with a warning and hydrates the rest, and the conflict handler
+  settles a 412 on it by last-write-wins stamp instead of failing the
+  replication cycle on every retry. Any grant holder can write such a body, and
+  before this every hydrate of that collection rejected.
 - The sync bootstrap guards its per-collection hook. A cipher rebuild that
   throws `KeyUnwrapError` (a roster rotated off this app since the cached
   descriptor) now costs that one collection, which is warned about and left on

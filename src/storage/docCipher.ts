@@ -74,18 +74,20 @@ export interface DocCipher extends ClientDocCipher {
  * are stored as-is, and the stored resource id IS the payload's logical `id`
  * (uuid). With nothing to hide there is no reason for a second, opaque id
  * plane, and a public document then keeps a stable, shareable resource URL
- * across edits. `decrypt` refuses an EDV envelope (via
- * {@link isEncryptedEnvelope}) rather than mis-reading its random envelope id
- * as a logical uuid -- a public collection holding ciphertext rows is a
- * visibility misconfiguration, surfaced as a read error instead of silent
- * garbage. It also verifies the id binding that IS real here (the row id
- * equals the payload's own `id`): a body read under a resource id that does
+ * across edits. `decrypt` verifies the one binding that IS real here (the row
+ * id equals the payload's own `id`): a body read under a resource id that does
  * not match its own `id` field is a server serving one document's content
  * under another's URL, and `decrypt` raises `IntegrityError` rather than
  * silently returning the mismatched payload. A body carrying no string `id`
- * at all fails that binding the same way, and a caller that passes no resource
- * id to check against is refused outright by was-client's own
- * `requireResourceId`, the guard both of its built-in ciphers run first.
+ * at all fails that binding the same way, and so does an EDV envelope (via
+ * {@link isEncryptedEnvelope}): its `id` is a random envelope id, not a
+ * logical uuid, so it is refused rather than mis-read. All three are one
+ * failure, a stored row that is not a plaintext document bound to its resource
+ * id, raised as one error so the storage layer above applies one rule to them
+ * (a public collection takes writes from any grant holder, and such a row is
+ * malformed data, not a broken seal). A caller that passes no resource id to
+ * check against is refused outright by was-client's own `requireResourceId`,
+ * the guard both of its built-in ciphers run first.
  *
  * @param options {object}
  * @param options.collectionId {string}   labels errors only
@@ -107,7 +109,7 @@ export function createPlaintextDocCodec({
   }
   const assertPlaintext = (body: Json): Json => {
     if (isEncryptedEnvelope(body)) {
-      throw new Error(
+      throw new IntegrityError(
         `Collection "${collectionId}" is public (plaintext) but the stored ` +
           `row is an EDV envelope.`
       )

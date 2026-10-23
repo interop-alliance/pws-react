@@ -98,14 +98,18 @@ export function dbNameForController({
 }
 
 /**
- * Whether a decrypt failure is the mis-bound payload id a PUBLIC collection
+ * Whether a decrypt failure is the malformed body a PUBLIC collection
  * tolerates, logging the recovery when it is. A public collection takes writes
- * from anything holding a grant on it, so a body whose `id` does not match the
- * resource id it is stored under is a malformed document rather than a broken
- * seal, and neither hydration nor conflict resolution may fail over it -- the
- * server's body is unchanged on every retry, so a hard failure would break that
- * collection permanently. On a private collection the same error means an
- * envelope sealed for another resource, and is never tolerated.
+ * from anything holding a grant on it, so a row that is not a plaintext
+ * document bound to its resource id (a body whose `id` does not match the
+ * resource id it is stored under, one with no string `id`, or an EDV envelope
+ * written into a plaintext collection) is a malformed document rather than a
+ * broken seal, and neither hydration nor conflict resolution may fail over it
+ * -- the server's body is unchanged on every retry, so a hard failure would
+ * break that collection permanently. The plaintext codec raises every one of
+ * those as `IntegrityError`, which is what this recognizes. On a private
+ * collection the same error means an envelope sealed for another resource, and
+ * is never tolerated.
  *
  * @param options {object}
  * @param options.isPublic {boolean}
@@ -115,7 +119,7 @@ export function dbNameForController({
  * @param options.recovery {string}   what the caller does instead, for the log
  * @returns {boolean}
  */
-function toleratesMisboundId({
+function toleratesMalformedPublicRow({
   isPublic,
   err,
   collectionKey,
@@ -132,8 +136,8 @@ function toleratesMisboundId({
     return false
   }
   log.warn(
-    'A public collection\'s payload "id" does not match the resource id it ' +
-      `is stored under; ${recovery}.`,
+    'A public collection holds a row that is not a plaintext document bound ' +
+      `to its resource id; ${recovery}.`,
     { resourceId, collectionKey, err }
   )
   return true
@@ -172,15 +176,15 @@ function conflictSideDecrypt({
     try {
       return await storeHolder.current!.decryptEnvelope({ key, id, envelope })
     } catch (err) {
-      // A tolerated mis-binding is compared on the last-write-wins stamp the
-      // malformed body still carries (hydration skips it either way, see
+      // A tolerated malformed row is compared on whatever last-write-wins
+      // stamp its body still carries (hydration skips it either way, see
       // `#decodeAll`). A private collection's mismatch propagates, and was-sync
       // keeps it separate from its undecryptable-side handling: it comes out of
       // `resolve`, RxDB scores the resolution itself as failed, and that
       // collection's replication cycle fails the way any other fatal
       // replication error does.
       if (
-        !toleratesMisboundId({
+        !toleratesMalformedPublicRow({
           isPublic,
           err,
           collectionKey: key,
@@ -941,8 +945,8 @@ export class LocalStore {
 
   /**
    * Decrypts every live row of a collection, dropping rows that carry no
-   * ciphertext, and (with a warning) a public collection's rows that fail the
-   * id binding. Each result keeps its RxDocument alongside the plaintext, so a
+   * ciphertext, and (with a warning) a public collection's rows that are not
+   * plaintext documents bound to their resource id. Each result keeps its RxDocument alongside the plaintext, so a
    * caller that goes on to remove a row (e.g. the singleton reconciler) needs no
    * second lookup.
    *
@@ -975,7 +979,7 @@ export class LocalStore {
         } catch (err) {
           // One malformed row must not fail hydration of the rest.
           if (
-            !toleratesMisboundId({
+            !toleratesMalformedPublicRow({
               isPublic: isPublicRow,
               err,
               collectionKey: key,
