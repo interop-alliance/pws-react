@@ -74,9 +74,11 @@ export interface WasSyncBootstrap {
  * absent descriptor. The collection is skipped entirely, hook included, and
  * reported on `failures`, so neither a placeholder cipher nor a declaration
  * write is built on a guess about a collection whose roster could not be
- * read. Every collection settles: an outage affecting several reports each
- * of them, and the caller decides what a non-empty `failures` means (the
- * login-time read rejects on it, the bootstrap warns and skips).
+ * read. A hook that rejects is reported on `failures` the same way, and its
+ * descriptor leaves the returned set. Every collection settles: an outage
+ * affecting several reports each of them, and the caller decides what a
+ * non-empty `failures` means (the login-time read rejects on it, the
+ * bootstrap warns and skips).
  *
  * @param options {object}
  * @param options.remoteStore {WasRemoteStore}
@@ -89,7 +91,7 @@ export interface WasSyncBootstrap {
  *   skipped for a known descriptor) and the descriptor known for it (absent
  *   for a public one, or one carrying none)
  * @returns {Promise<DescriptorReadOutcome>}   the epoch-bearing descriptors,
- *   keyed by WAS collection id, and the collections whose read failed
+ *   keyed by WAS collection id, and the collections whose read or hook failed
  */
 async function readGrantedEncryption({
   remoteStore,
@@ -151,11 +153,24 @@ async function readGrantedEncryption({
         descriptors[collectionId] = encryption
       }
       if (onCollection) {
-        await onCollection({
-          collection,
-          ...(encryption && { encryption }),
-          ...(current && { current })
-        })
+        // The hook is guarded per collection too. A cipher rebuild raises
+        // `KeyUnwrapError` when the served roster lists epochs and leaves this
+        // app out (rotated off since the cached descriptor), and a throw
+        // escaping `Promise.all` here would reject the whole bootstrap:
+        // nothing after the pass would run and no collection would replicate.
+        // The failure costs that one collection, and its descriptor is
+        // withdrawn from the fetched set so a roster this app cannot open is
+        // not written into the offline cache the next bring-up opens from.
+        try {
+          await onCollection({
+            collection,
+            ...(encryption && { encryption }),
+            ...(current && { current })
+          })
+        } catch (err) {
+          delete descriptors[collectionId]
+          failures.push({ collection, err })
+        }
       }
     })
   )
@@ -165,7 +180,8 @@ async function readGrantedEncryption({
 /**
  * What one pass of Metadata reads settled to: the epoch-bearing descriptors
  * (a rosterless one cannot build a cipher) and, apart from them, every
- * collection whose read failed rather than answering "no object".
+ * collection whose read failed rather than answering "no object", or whose
+ * per-collection hook rejected.
  */
 export type DescriptorReadOutcome = {
   descriptors: Record<string, CollectionEncryption>
@@ -424,13 +440,15 @@ export async function startWasSync({
       }
     }
   })
-  // A read that failed degrades that one collection: it keeps the cipher it
-  // opened with (the cached descriptor, or fail-closed) and receives no
-  // declaration write this session. It is not "no object".
+  // A read or a hook that failed degrades that one collection: it keeps the
+  // cipher it opened with (the cached descriptor, or fail-closed) and receives
+  // no declaration write this session. A failed read is not "no object", and
+  // a failed cipher rebuild (a roster rotated off this app) is a
+  // `KeyUnwrapError` the per-row decrypts repeat, not a bootstrap failure.
   for (const { collection, err } of failures) {
     log.warn(
       'Skipping the sync bootstrap of a collection: its metadata object ' +
-        'could not be read.',
+        'could not be read, or its bring-up failed.',
       { collectionId: collection.id, err }
     )
   }

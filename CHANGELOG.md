@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- The sync bootstrap guards its per-collection hook. A cipher rebuild that
+  throws `KeyUnwrapError` (a roster rotated off this app since the cached
+  descriptor) now costs that one collection, which is warned about and left on
+  the cipher it opened with, while every other collection replicates. Before,
+  the throw rejected `startWasSync` as a whole and no collection replicated
+  while the session stayed `connected`.
+
 - `reconnect()` runs its post-popup epilogue (controller stop, record persist,
   sync restart, `connected` transition) on the lifecycle chain and re-checks the
   session first. A `logout`, `clearLocalData`, or `destroy` completed while the

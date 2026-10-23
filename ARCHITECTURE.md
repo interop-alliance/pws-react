@@ -984,10 +984,14 @@ instead, and a reload while offline still restores the connected session. The
 bootstrap skips that one collection entirely, hook included, with a warning. It
 keeps whatever cipher it opened with (the cached descriptor, or fail-closed) and
 receives no declaration write this session; when the read succeeds on a later
-session it repairs the cipher then. The unknown-epoch refresh is the one place a
-failed read costs nothing further: the refresh is spent by the time the source
-answers, and the decrypt retry fails the same way it would under no refresh at
-all.
+session it repairs the cipher then. The bootstrap's per-collection hook is
+guarded the same way. A cipher rebuild that raises `KeyUnwrapError` (a roster
+rotated off this app since the cached descriptor) is reported beside the failed
+reads, its descriptor is withdrawn from the set handed to the offline cache, and
+every other collection still replicates. The unknown-epoch refresh is the one
+place a failed read costs nothing further: the refresh is spent by the time the
+source answers, and the decrypt retry fails the same way it would under no
+refresh at all.
 
 A descriptor's epoch roster can also simply not include this app: not "no
 descriptor" and not "no epochs", but a roster whose recipients never wrapped a

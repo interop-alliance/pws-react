@@ -11,7 +11,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { CollectionEncryption } from '@interop/was-client'
-import { UnverifiedDescriptorError } from '@interop/was-client/edv'
+import {
+  KeyUnwrapError,
+  UnverifiedDescriptorError
+} from '@interop/was-client/edv'
 import type { WasCollectionConfig } from '../config.js'
 import type { ParsedGrants } from '../grants.js'
 import type { LocalStore } from './localStore.js'
@@ -261,6 +264,60 @@ describe('startWasSync descriptor read failure', () => {
     setLogger(previous)
     // Replication still starts.
     expect(syncController.start).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('startWasSync hook failure', () => {
+  it('costs the collection whose cipher rebuild throws, and replicates the rest', async () => {
+    const capture = captureLogger('wr')
+    const previous = setLogger(capture.logger)
+    const remote = stubRemoteStore({ notes: descriptor, tasks: descriptor })
+    // The served roster lists epochs and leaves this app out: the rebuild is
+    // where that surfaces, as `KeyUnwrapError`.
+    const rotatedOff = new KeyUnwrapError('no key for epoch e0')
+    const localStore = {
+      applyRemoteDescriptor: vi.fn(
+        async ({ collectionId }: { collectionId: string }) => {
+          if (collectionId === 'tasks') {
+            throw rotatedOff
+          }
+        }
+      ),
+      applyCollectionMeta: vi.fn(async () => {}),
+      setDescriptorSource: vi.fn()
+    }
+    const syncController = { start: vi.fn(async () => {}) }
+    const fetched = vi.fn()
+
+    await startWasSync({
+      parsed,
+      zcapClient,
+      collections,
+      localStore: localStore as unknown as LocalStore,
+      syncController: syncController as unknown as SyncController,
+      onRemoteChange: () => {},
+      onDescriptorsFetched: fetched
+    })
+
+    // The other collection went through the whole per-collection pass, and
+    // the failed one took no declaration write after its rebuild threw.
+    expect(
+      remote.declareCollectionIndexes.mock.calls.map(([id]) => id)
+    ).toEqual(['notes'])
+    // Everything after the pass still ran: the descriptor source, the offline
+    // cache (without the roster this app cannot open), and replication.
+    expect(localStore.setDescriptorSource).toHaveBeenCalledTimes(1)
+    expect(fetched).toHaveBeenCalledWith({ notes: descriptor })
+    expect(syncController.start).toHaveBeenCalledTimes(1)
+    expect(
+      capture.events.some(
+        event =>
+          event.level === 'warn' &&
+          event.data?.collectionId === 'tasks' &&
+          event.err === rotatedOff
+      )
+    ).toBe(true)
+    setLogger(previous)
   })
 })
 
