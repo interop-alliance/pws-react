@@ -693,7 +693,10 @@ of its `allowedAction`, which could only pause the reader again. A replacement
 is accepted on a live reader too (a renewal ahead of expiry); every replacement
 bumps a generation, and a denial raised by a request that left under the
 previous zcap pauses nothing, so a renewal racing an in-flight pull cannot leave
-the reader paused with no further zcap coming.
+the reader paused with no further zcap coming. Such a stale denial still cuts
+the walk short, so the pull it ends is reported as partial: `snapshot` is
+`false` even on a replay or a listing read, since only a read that ran to its
+end is a full one.
 
 On the wire a denial is a 401 or 403, or the masked 404 WAS answers an
 unauthorized caller with, named `capability-revoked` or `capability-expired`

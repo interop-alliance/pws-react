@@ -10,6 +10,12 @@
   re-grant popup was open is no longer undone when the popup answers: the
   renewed grants are discarded with a warning, nothing is persisted, and no sync
   or expiry watch starts over the torn-down session.
+- `AudienceReader.pull()` no longer reports a replay (or a listing read) cut by
+  a denial of a request that left under a since-replaced zcap as
+  `snapshot: true`. Such a cut pauses nothing but leaves the read partial; the
+  pull now returns `snapshot: false` with the pages it did read, and the
+  checkpoint stays at the last fully read page. A consumer applying the partial
+  set as a snapshot would have dropped every post the cut kept it from reading.
 
 ## 0.30.0 - 2026-10-12
 

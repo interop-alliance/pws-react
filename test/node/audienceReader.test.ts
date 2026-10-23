@@ -540,4 +540,55 @@ describe('AudienceReader cut and resume', () => {
     const { changes } = await reader.pull()
     expect(changes.map(change => change.id)).toEqual(['p1'])
   }, 60000)
+
+  it('a replay cut by a stale denial is not a snapshot and keeps the pages read', async () => {
+    const { grant, collection } = await provisionAudience()
+    for (const index of [1, 2, 3]) {
+      await collection.put(`p${index}`, { postId: `post-${index}` })
+    }
+    const zcap = await grant()
+    const replacement = await grant()
+    const reader = AudienceReader.open({
+      zcap,
+      signer,
+      pageSize: 1,
+      checkpoint: 'not-a-checkpoint-this-server-issued'
+    })
+    // Query 1 is the refused checkpoint (a real 400), so the reader replays
+    // from the start: query 2 is the metadata record's page, query 3 the
+    // first post's, during which a renewal lands. Query 4 left under the
+    // superseded zcap and is denied: a cut that pauses nothing.
+    const realFetch = globalThis.fetch
+    let queries = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (!new URL(url).pathname.endsWith('/query')) {
+        return realFetch(input, init)
+      }
+      queries += 1
+      if (queries === 3) {
+        reader.replaceCapability({ zcap: replacement })
+      }
+      if (queries === 4) {
+        return new Response(null, { status: 404 })
+      }
+      return realFetch(input, init)
+    })
+    const replay = await reader.pull()
+    vi.restoreAllMocks()
+    expect(queries).toBe(4)
+    // Partial: a consumer applying it as a snapshot would drop p2 and p3,
+    // and the checkpoint has moved past them.
+    expect(replay.snapshot).toBe(false)
+    expect(replay.paused).toBe(false)
+    expect(replay.changes.map(change => change.id)).toEqual(['p1'])
+    expect(reader.paused).toBe(false)
+    expect(reader.checkpoint).not.toBeNull()
+    expect(reader.checkpoint).not.toBe('not-a-checkpoint-this-server-issued')
+
+    // The next pull resumes from the last fully read page.
+    const resumed = await reader.pull()
+    expect(resumed.snapshot).toBe(false)
+    expect(resumed.changes.map(change => change.id)).toEqual(['p2', 'p3'])
+  }, 60000)
 })

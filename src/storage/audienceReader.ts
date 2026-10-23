@@ -87,15 +87,29 @@ export interface AudienceChange {
  * read rather than a delta since the last checkpoint: every live post is in
  * it, and a post the consumer holds that is not is gone. That is the answer
  * on a server with no usable feed, and on a replay from the feed's start after
- * the server refused the reader's checkpoint. `paused` is `true` when the pull
- * was denied under the reader's current zcap; the changes collected before
- * the cut are still returned, the checkpoint covers exactly them, and such a
- * partial read is never a snapshot.
+ * the server refused the reader's checkpoint, in both cases only when the read
+ * ran to the end. `paused` is `true` when the pull was denied under the
+ * reader's current zcap; the changes collected before the cut are still
+ * returned, the checkpoint covers exactly them, and such a partial read is
+ * never a snapshot. Neither is a read cut by a denial of a request that left
+ * under a zcap since replaced: that cut pauses nothing, but the read is still
+ * partial.
  */
 export interface AudiencePull {
   changes: AudienceChange[]
   snapshot: boolean
   paused: boolean
+}
+
+/**
+ * What one walk of the feed, or one read of the listing, collected. `complete`
+ * is whether the read ran to its end: `false` on any cut, whether or not that
+ * cut paused the reader. The pull derives `snapshot` from it.
+ */
+interface FeedRead {
+  changes: AudienceChange[]
+  paused: boolean
+  complete: boolean
 }
 
 export class AudienceReader {
@@ -274,10 +288,13 @@ export class AudienceReader {
       return { changes: [], snapshot: false, paused: true }
     }
     if (this.#feedUnsupported) {
-      return this.#pullSnapshot()
+      return toPull(await this.#pullSnapshot())
     }
     try {
-      return await this.#pullFeed({ checkpoint: this.#checkpoint })
+      const read = await this.#pullFeed({ checkpoint: this.#checkpoint })
+      // A walk that fell back to the listing mid-pull flipped the flag, and
+      // only then is a complete read a snapshot rather than a delta.
+      return toPull(read, { full: this.#feedUnsupported })
     } catch (err) {
       if (
         !(err instanceof ValidationError) ||
@@ -295,8 +312,9 @@ export class AudienceReader {
           'feed from its start.',
         { collectionId: this.#collectionId, err }
       )
-      const replay = await this.#pullFeed({ checkpoint: null })
-      return { ...replay, snapshot: !replay.paused }
+      // A replay from the start is a full read only when it ran to the end:
+      // a cut, paused or stale, leaves it partial.
+      return toPull(await this.#pullFeed({ checkpoint: null }), { full: true })
     }
   }
 
@@ -310,7 +328,7 @@ export class AudienceReader {
     checkpoint
   }: {
     checkpoint: ChangesCheckpoint | null
-  }): Promise<AudiencePull> {
+  }): Promise<FeedRead> {
     const generation = this.#generation
     const collection = this.#collection
     const changes: AudienceChange[] = []
@@ -347,7 +365,7 @@ export class AudienceReader {
     } catch (err) {
       if (this.#cut({ err, generation })) {
         this.#checkpoint = reached
-        return { changes, snapshot: false, paused: this.#paused }
+        return { changes, paused: this.#paused, complete: false }
       }
       if (!feedUnavailable(err)) {
         throw err
@@ -361,7 +379,7 @@ export class AudienceReader {
       return this.#pullSnapshot()
     }
     this.#checkpoint = reached
-    return { changes, snapshot: false, paused: false }
+    return { changes, paused: false, complete: true }
   }
 
   /**
@@ -398,7 +416,7 @@ export class AudienceReader {
    * cut; a null body for a listed resource is a deletion racing the walk or
    * the masked denial, settled by one container read.
    */
-  async #pullSnapshot(): Promise<AudiencePull> {
+  async #pullSnapshot(): Promise<FeedRead> {
     const generation = this.#generation
     const collection = this.#collection
     const changes: AudienceChange[] = []
@@ -427,11 +445,11 @@ export class AudienceReader {
       }
     } catch (err) {
       if (this.#cut({ err, generation })) {
-        return { changes: [], snapshot: false, paused: this.#paused }
+        return { changes: [], paused: this.#paused, complete: false }
       }
       throw err
     }
-    return { changes, snapshot: true, paused: false }
+    return { changes, paused: false, complete: true }
   }
 
   /**
@@ -475,6 +493,22 @@ export class AudienceReader {
       stale: generation !== this.#generation
     })
     return true
+  }
+}
+
+/**
+ * The pull a read answers. A read is a snapshot only when it was a full read
+ * (`full`: the listing, or a replay from the feed's start) that ran to its
+ * end; a delta is never one, and neither is any read a cut left partial.
+ */
+function toPull(
+  read: FeedRead,
+  { full = true }: { full?: boolean } = {}
+): AudiencePull {
+  return {
+    changes: read.changes,
+    snapshot: full && read.complete,
+    paused: read.paused
   }
 }
 
