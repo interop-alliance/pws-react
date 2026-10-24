@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- `LocalStore.setDescriptorSource` re-arms the refresh guard, the in-flight
+  refresh, and the recorded refusals together, and a refresh that outlives its
+  source records nothing.
+- A refresh whose fetched roster excludes this app is recorded and surfaces as
+  `KeyUnwrapError`; a refresh that fails on the wire is logged and left
+  un-spent.
+- Per-collection cipher changes (the refresh, `applyRemoteDescriptor`,
+  `applyCollectionMeta`) are serialized, and a descriptor that is an earlier
+  head of the log than the held one is not swapped back in.
 - A public (plaintext) collection row whose body is an EDV envelope (an object
   `jwe` member) no longer breaks the collection. The plaintext codec raises it
   as `IntegrityError`, the same failure a mis-bound payload id is, so hydration

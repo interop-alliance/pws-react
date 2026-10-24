@@ -17,6 +17,14 @@ import type { EncryptionDescriptorStore } from '@interop/was-client/edv'
 import type { CollectionEncryption } from '@interop/was-client'
 
 /**
+ * A fixed 32-byte seed for a second identity, so a roster can carry a
+ * recipient that is not the app under test.
+ */
+export const FOREIGN_SEED = new Uint8Array(32).map(
+  (_, index) => (index * 5 + 1) & 0xff
+)
+
+/**
  * An in-memory `EncryptionDescriptorStore`, the seam the recipient operations
  * mutate a descriptor through: a read with its validator, a compare-and-swap
  * replace, and the create-if-absent branch a store that starts empty takes.

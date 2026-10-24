@@ -23,11 +23,12 @@ import {
 } from '@interop/was-client/edv'
 import type { CollectionEncryption } from '@interop/was-client'
 import { isIntegrityError } from '@interop/was-client/sync'
+import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import { LocalStore } from '../../src/storage/localStore.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import type { WasCollectionConfig } from '../../src/config.js'
 import { encodeIndexSchemaMeta } from '../fixtures/indexSchemaMeta.js'
-import { mintRoster } from '../fixtures/roster.js'
+import { FOREIGN_SEED, mintRoster, rotateRoster } from '../fixtures/roster.js'
 
 // A neutral test collection registry (not any app's real collections).
 const COLLECTIONS: WasCollectionConfig[] = [{ key: 'notes', id: 'notes' }]
@@ -384,6 +385,121 @@ async function rawIndexed(store: LocalStore): Promise<unknown[]> {
   return envelope.indexed ?? []
 }
 
+/**
+ * Wraps the identity KAK so that, while the gate is closed, every
+ * `deriveSecret` (the epoch unwrap a cipher build runs) waits for it to open.
+ * `reached()` resolves once a build has arrived at the gate, which is how a
+ * test holds a cipher rebuild mid-build while it queues other work behind it.
+ */
+function gatedKey(keyAgreementKey: IKeyAgreementKey) {
+  let closed = false
+  let open = () => {}
+  let opened = Promise.resolve()
+  let arrived = () => {}
+  let arrival = new Promise<void>(resolve => {
+    arrived = resolve
+  })
+  const key = new Proxy(keyAgreementKey, {
+    get(target, property, receiver) {
+      if (property === 'deriveSecret') {
+        return async (
+          options: Parameters<IKeyAgreementKey['deriveSecret']>[0]
+        ) => {
+          if (closed) {
+            arrived()
+            await opened
+          }
+          return target.deriveSecret(options)
+        }
+      }
+      const value: unknown = Reflect.get(target, property, receiver)
+      return typeof value === 'function' ? value.bind(target) : value
+    }
+  })
+  return {
+    key,
+    close() {
+      closed = true
+      opened = new Promise<void>(resolve => {
+        open = resolve
+      })
+      arrival = new Promise<void>(resolve => {
+        arrived = resolve
+      })
+    },
+    open() {
+      closed = false
+      open()
+    },
+    reached() {
+      return arrival
+    }
+  }
+}
+
+/**
+ * Opens a store on a gated KAK over one indexable descriptor.
+ */
+async function openGatedStore(
+  keyAgreementKey: IKeyAgreementKey,
+  encryption: CollectionEncryption
+): Promise<LocalStore> {
+  const { keyResolver } = await identityKeys()
+  const store = await LocalStore.init({
+    keyAgreementKey,
+    keyResolver,
+    collections: COLLECTIONS,
+    dbName: `was-react-test-${++dbCounter}`,
+    descriptors: { [COLLECTION]: encryption }
+  })
+  openStores.push(store)
+  return store
+}
+
+describe('LocalStore.applyRemoteDescriptor', () => {
+  it('does not swap an earlier head of the log back in over a later one', async () => {
+    // Two reads of one governing log can settle in either order. Once the
+    // cipher is on the rotated (two-epoch) roster, the one-epoch roster it
+    // grew from is an earlier head and must be ignored, not installed.
+    const { keyAgreementKey } = await identityKeys()
+    const bystander = await deriveIdentity({ seed: FOREIGN_SEED })
+    const bystanderRecipient = ownerRecipient({
+      keyAgreementKey: bystander.keyAgreementKey
+    })
+    const earlier = await mintRoster({
+      recipients: [ownerRecipient({ keyAgreementKey }), bystanderRecipient]
+    })
+    const later = await rotateRoster({
+      descriptor: earlier,
+      removeKid: bystanderRecipient.id
+    })
+    const store = await openStore(
+      `was-react-test-${++dbCounter}`,
+      COLLECTIONS,
+      { [COLLECTION]: earlier }
+    )
+
+    expect(
+      await store.applyRemoteDescriptor({
+        collectionId: COLLECTION,
+        encryption: later
+      })
+    ).toBe(true)
+    expect(
+      await store.applyRemoteDescriptor({
+        collectionId: COLLECTION,
+        encryption: earlier
+      })
+    ).toBe(false)
+
+    await store.insertEntity(
+      COLLECTION,
+      makeNote('Sealed under the later epoch')
+    )
+    expect((await rawRow(store)).epoch).toBe(later.currentEpoch)
+  })
+})
+
 describe('LocalStore.applyCollectionMeta', () => {
   it('ignores an unknown id and a public collection', async () => {
     const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
@@ -441,6 +557,66 @@ describe('LocalStore.applyCollectionMeta', () => {
 
     await store.insertEntity(COLLECTION, makeNote('Still indexed'))
     expect(await rawIndexed(store)).toHaveLength(1)
+  })
+
+  it('serializes a schema install with a concurrent cipher rebuild', async () => {
+    // A rebuild is held mid-build (its epoch unwrap is gated) with no schema
+    // remembered when the install arrives. Without the chain the install
+    // lands on the cipher the rebuild then replaces, and the replacement,
+    // built before the schema was remembered, stamps nothing.
+    const encryption = await mintIndexableDescriptor()
+    const gate = gatedKey((await identityKeys()).keyAgreementKey)
+    const store = await openGatedStore(gate.key, encryption)
+    const custom = await encodeIndexSchemaMeta({
+      encryption,
+      collectionId: COLLECTION,
+      keys: await identityKeys()
+    })
+
+    gate.close()
+    const rebuilding = store.rebuildCipher({ key: COLLECTION, encryption })
+    await gate.reached()
+    const applying = store.applyCollectionMeta({
+      collectionId: COLLECTION,
+      custom
+    })
+    gate.open()
+    await rebuilding
+    expect(await applying).toBe(true)
+
+    await store.insertEntity(COLLECTION, makeNote('Indexed either way'))
+    expect(await rawIndexed(store)).toHaveLength(1)
+  })
+
+  it('keeps an unvalidated metadata value away from a rebuild queued ahead of it', async () => {
+    // Two rebuilds are queued (the first held mid-build) when an install with
+    // an undecodable value arrives. The value is remembered only inside the
+    // chain, so the second rebuild builds without it and succeeds; the install
+    // itself is what fails.
+    const encryption = await mintIndexableDescriptor()
+    const gate = gatedKey((await identityKeys()).keyAgreementKey)
+    const store = await openGatedStore(gate.key, encryption)
+    const foreign = await encodeIndexSchemaMeta({
+      encryption,
+      collectionId: 'other-collection',
+      keys: await identityKeys()
+    })
+
+    gate.close()
+    const first = store.rebuildCipher({ key: COLLECTION, encryption })
+    await gate.reached()
+    const second = store.rebuildCipher({ key: COLLECTION, encryption })
+    const applying = store.applyCollectionMeta({
+      collectionId: COLLECTION,
+      custom: foreign
+    })
+    gate.open()
+    await first
+    await second
+    await expect(applying).rejects.toThrow()
+
+    await store.insertEntity(COLLECTION, makeNote('Still writable'))
+    expect(await store.listEntities(COLLECTION)).toHaveLength(1)
   })
 
   it('remembers metadata applied while the placeholder cipher is held', async () => {

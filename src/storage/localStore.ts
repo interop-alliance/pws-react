@@ -57,7 +57,11 @@ import {
 } from './docCipher.js'
 import { log } from '../log.js'
 import { remotePayloadWins } from '@interop/social-core'
-import { epochRostersEqual, hasKeyEpochs } from '@interop/was-client/edv'
+import {
+  epochRostersEqual,
+  hasKeyEpochs,
+  isKeyUnwrapError
+} from '@interop/was-client/edv'
 import {
   acquireGovernedDescriptor,
   isDescriptorRefusal
@@ -280,11 +284,15 @@ export class LocalStore {
   readonly #refreshPolicy: DescriptorRefreshPolicy
   readonly #refreshing = new Map<string, Promise<void>>()
   // Per collection, the refusal its refresh met: a source that does not
-  // verify the governing log, or a governing log the source refused to
-  // adopt. Kept so the decrypt that spent the refresh, and every later one,
-  // surfaces that refusal as itself rather than as the envelope's unknown
-  // epoch (see `#decryptWithRefresh`).
+  // verify the governing log, a governing log the source refused to adopt, or
+  // a fetched roster that lists the epoch but wraps no key to this app
+  // (`KeyUnwrapError` from the rebuild). Kept so the decrypt that spent the
+  // refresh, and every later one, surfaces that refusal as itself rather than
+  // as the envelope's unknown epoch (see `#decryptWithRefresh`).
   readonly #refusals = new Map<string, Error>()
+  // Per collection LOGICAL key, the tail of its cipher-rebuild chain (see
+  // `#serializeRebuild`).
+  readonly #rebuilds = new Map<string, Promise<unknown>>()
 
   private constructor({
     db,
@@ -330,16 +338,42 @@ export class LocalStore {
         if (key === undefined || !source) {
           return
         }
-        let encryption: CollectionEncryption | undefined
+        // The bookkeeping below belongs to the source this refresh ran under.
+        // A source installed meanwhile (`setDescriptorSource`) cleared the
+        // maps for its own sake, and a write from this refresh would land
+        // under it: a refusal the new source never gave, or the deletion of
+        // the memo the new source's refresh holds.
+        const sourceStands = () => this.#descriptorSource === source
         try {
-          encryption = await acquireGovernedDescriptor({ source, collectionId })
+          const encryption = await acquireGovernedDescriptor({
+            source,
+            collectionId
+          })
+          if (hasKeyEpochs(encryption)) {
+            // Behind the same freshness gate as `applyRemoteDescriptor`, but
+            // re-arming nothing: this runs inside the one refresh the session
+            // rations.
+            await this.#serializeRebuild(key, async () => {
+              if (!this.#holdsOrPostdates({ key, encryption })) {
+                await this.#rebuildCipherNow({ key, encryption })
+              }
+            })
+          }
         } catch (err) {
-          // A refused source stays refused for the session (the source is
-          // installed once), so the refresh is spent rather than un-armed:
-          // the policy would otherwise re-ask on every decrypt. The refusal
-          // is what the decrypt surfaces.
-          if (isDescriptorRefusal(err)) {
-            this.#refusals.set(collectionId, err)
+          // A refused source stays refused until another source is installed
+          // (see `setDescriptorSource`), so the refresh is spent rather than
+          // un-armed: the policy would otherwise re-ask on every decrypt. A
+          // roster that lists the epoch but wraps no key to this app is the
+          // same kind of answer (the source has spoken, and asking again
+          // changes nothing), so a `KeyUnwrapError` from the rebuild is
+          // recorded too. The recorded error is what the decrypt surfaces.
+          if (
+            isDescriptorRefusal(err) ||
+            (isKeyUnwrapError(err) && err instanceof Error)
+          ) {
+            if (sourceStands()) {
+              this.#refusals.set(collectionId, err)
+            }
             return
           }
           // Any other failure (a dropped connection, a 5xx) is rethrown into
@@ -351,11 +385,10 @@ export class LocalStore {
               'decrypt that meets one retries it.',
             { collectionId, err }
           )
-          this.#refreshing.delete(collectionId)
+          if (sourceStands()) {
+            this.#refreshing.delete(collectionId)
+          }
           throw err
-        }
-        if (hasKeyEpochs(encryption)) {
-          await this.rebuildCipher({ key, encryption })
         }
       }
     })
@@ -548,13 +581,20 @@ export class LocalStore {
    * per collection id (the remote store's log-governed source). Called once a
    * remote store exists; a decrypt that meets an unknown key epoch uses it to
    * re-read the descriptor, under `requireGoverned`, and rebuild that
-   * collection's cipher, at most once per collection per session.
+   * collection's cipher, at most once per collection per source.
+   *
+   * Installing a source (a reconnect does it again over the same store)
+   * re-arms every collection's refresh as a whole: the spent guard, the
+   * in-flight memo, and the recorded refusals go together, or a recorded
+   * refusal would surface as a bare unknown epoch under the stale cipher.
    *
    * @param source {EncryptionDescriptorSource}
    * @returns {void}
    */
   setDescriptorSource(source: EncryptionDescriptorSource): void {
     this.#descriptorSource = source
+    this.#refreshPolicy.reset()
+    this.#refreshing.clear()
     this.#refusals.clear()
   }
 
@@ -637,10 +677,33 @@ export class LocalStore {
   }
 
   /**
+   * Runs one operation on a collection's cipher after every earlier one on the
+   * same collection has settled. The refresh, {@link applyRemoteDescriptor},
+   * and {@link applyCollectionMeta} all go through here, so a schema install
+   * cannot land on a cipher a concurrent rebuild then replaces, and two
+   * rebuilds cannot interleave. A failed operation does not block the chain.
+   *
+   * @param key {string}   the collection logical key
+   * @param op {function}   the operation, run once the chain reaches it
+   * @returns {Promise<T>}   the operation's own result
+   */
+  #serializeRebuild<T>(key: string, op: () => Promise<T>): Promise<T> {
+    const previous = this.#rebuilds.get(key) ?? Promise.resolve()
+    const run = previous.then(op)
+    this.#rebuilds.set(
+      key,
+      run.catch(() => undefined)
+    )
+    return run
+  }
+
+  /**
    * Rebuilds one private collection's cipher from a new (epoch-bearing)
-   * encryption descriptor, on the same identity KAK the store was opened with. A public (plaintext)
-   * collection has no EDV cipher and is a no-op. The new cipher replaces the
-   * held one in place, so the conflict handler and every read path pick it up.
+   * encryption descriptor, on the same identity KAK the store was opened with.
+   * A public (plaintext) collection has no EDV cipher and is a no-op. The new
+   * cipher replaces the held one in place, so the conflict handler and every
+   * read path pick it up. Rebuilds of one collection are serialized with each
+   * other and with {@link applyCollectionMeta}.
    *
    * The collection metadata last installed by {@link applyCollectionMeta} is
    * re-applied at build time, so the blinded-index schema survives an
@@ -666,6 +729,67 @@ export class LocalStore {
     if (isPublicCollection(config)) {
       return
     }
+    await this.#serializeRebuild(key, () =>
+      this.#rebuildCipherNow({ key, encryption })
+    )
+  }
+
+  /**
+   * Whether a fetched descriptor would not move the collection forward: the
+   * held cipher was built from the same roster, or from a LATER head of the
+   * same log. The refresh and the bootstrap's install read the same log
+   * concurrently, and the chain serializes their swaps without ordering them,
+   * so the later-settling read must not swap an older roster back in. Epochs
+   * are appended on rotation and never removed, so a descriptor that omits the
+   * held current epoch while the held roster lists its own is an earlier head.
+   * Anything the rule cannot place is treated as new and rebuilt.
+   *
+   * @param options {object}
+   * @param options.key {string}   the collection logical key
+   * @param options.encryption {CollectionEncryption}   the fetched descriptor
+   * @returns {boolean}
+   */
+  #holdsOrPostdates({
+    key,
+    encryption
+  }: {
+    key: string
+    encryption: CollectionEncryption
+  }): boolean {
+    const held = this.#descriptors[key]
+    if (held === undefined) {
+      return false
+    }
+    if (epochRostersEqual(held, encryption)) {
+      return true
+    }
+    const lists = (descriptor: CollectionEncryption, epochId?: string) =>
+      epochId !== undefined &&
+      (descriptor.epochs ?? []).some(epoch => epoch.id === epochId)
+    return (
+      lists(held, encryption.currentEpoch) &&
+      !lists(encryption, held.currentEpoch)
+    )
+  }
+
+  /**
+   * The rebuild itself, for callers already inside the collection's chain.
+   * Builds the cipher with the collection metadata last remembered by
+   * {@link applyCollectionMeta}, then records the descriptor it was built from.
+   *
+   * @param options {object}
+   * @param options.key {string}   the collection logical key
+   * @param options.encryption {CollectionEncryption}   the new descriptor
+   * @returns {Promise<void>}
+   */
+  async #rebuildCipherNow({
+    key,
+    encryption
+  }: {
+    key: string
+    encryption: CollectionEncryption
+  }): Promise<void> {
+    const config = this.collectionConfig(key)
     this.#ciphers[key] = await createDocCipher({
       keyAgreementKey: this.#keyAgreementKey,
       keyResolver: this.#keyResolver,
@@ -710,20 +834,26 @@ export class LocalStore {
     if (isPublicCollection(this.collectionConfig(key))) {
       return false
     }
-    // Remembered even when the collection currently holds the placeholder
-    // cipher: the schema then rides the rebuild that swaps in the real one.
-    this.#metas[key] = { custom }
-    try {
-      await this.#cipher(key).applyMeta?.({ custom })
-    } catch (err) {
-      // An undecodable value must not stay remembered: `createEdvDocCipher`
-      // applies build-time meta eagerly, so a poisoned memo would make the next
-      // rebuild (the unknown-epoch refresh) throw on a collection that reads
-      // fine today.
-      delete this.#metas[key]
-      throw err
-    }
-    return true
+    // Inside the collection's rebuild chain, so the install lands on the cipher
+    // that is current once any rebuild in flight has replaced it. The value is
+    // remembered inside the chain too, so a rebuild queued ahead of this
+    // install never builds with a value the install has not validated yet.
+    return await this.#serializeRebuild(key, async () => {
+      // Remembered even when the collection currently holds the placeholder
+      // cipher: the schema then rides the rebuild that swaps in the real one.
+      this.#metas[key] = { custom }
+      try {
+        await this.#cipher(key).applyMeta?.({ custom })
+      } catch (err) {
+        // An undecodable value must not stay remembered: `createEdvDocCipher`
+        // applies build-time meta eagerly, so a poisoned memo would make the
+        // next rebuild (the unknown-epoch refresh) throw on a collection that
+        // reads fine today.
+        delete this.#metas[key]
+        throw err
+      }
+      return true
+    })
   }
 
   /**
@@ -735,6 +865,11 @@ export class LocalStore {
    * so is a descriptor with no key-epoch roster (a bare `edv` declaration): no
    * cipher can be built from it, so the collection keeps its current cipher --
    * the fail-closed placeholder, when it opened without a cached roster.
+   *
+   * A descriptor that is an EARLIER head of the collection's log than the one
+   * the cipher was built from (a concurrent unknown-epoch refresh installed a
+   * newer one meanwhile) is ignored the same way, so the chain never swaps an
+   * older roster back in.
    *
    * Installing a fresh descriptor here also RE-ARMS the collection's
    * unknown-epoch refresh (the policy's documented `reset` contract): this path
@@ -761,14 +896,18 @@ export class LocalStore {
     if (isPublicCollection(config) || !hasKeyEpochs(encryption)) {
       return false
     }
-    if (epochRostersEqual(this.#descriptors[key], encryption)) {
-      return false
-    }
-    await this.rebuildCipher({ key, encryption })
-    this.#refreshPolicy.reset({ collectionId })
-    this.#refreshing.delete(collectionId)
-    this.#refusals.delete(collectionId)
-    return true
+    // The freshness check rides the chain with the rebuild, so a concurrent
+    // rebuild of the same (or a newer) roster is seen rather than undone.
+    return await this.#serializeRebuild(key, async () => {
+      if (this.#holdsOrPostdates({ key, encryption })) {
+        return false
+      }
+      await this.#rebuildCipherNow({ key, encryption })
+      this.#refreshPolicy.reset({ collectionId })
+      this.#refreshing.delete(collectionId)
+      this.#refusals.delete(collectionId)
+      return true
+    })
   }
 
   /**

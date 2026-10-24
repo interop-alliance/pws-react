@@ -19,26 +19,25 @@
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  KeyUnwrapError,
   ownerRecipient,
   UnverifiedDescriptorError
 } from '@interop/was-client/edv'
+import { captureLogger } from '@interop/logger'
 import type { CollectionEncryption } from '@interop/was-client'
 import { LocalStore } from '../../src/storage/localStore.js'
 import type { Json } from '@interop/was-sync'
 import { createDocCipher } from '../../src/storage/docCipher.js'
-import { mintRoster } from '../fixtures/roster.js'
+import { FOREIGN_SEED, mintRoster } from '../fixtures/roster.js'
 import { fakeDescriptorSource } from '../fixtures/descriptorSource.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import type { WasCollectionConfig } from '../../src/config.js'
+import { setLogger } from '../../src/log.js'
 
 const COLLECTIONS: WasCollectionConfig[] = [{ key: 'notes', id: 'notes' }]
 const COLLECTION_KEY = 'notes'
 const COLLECTION_ID = 'notes'
 const SEED = new Uint8Array(32).map((_, index) => (index * 9 + 2) & 0xff)
-// A second identity, so a roster can be minted that this app is NOT in.
-const FOREIGN_SEED = new Uint8Array(32).map(
-  (_, index) => (index * 5 + 1) & 0xff
-)
 
 let dbCounter = 0
 const openStores: LocalStore[] = []
@@ -80,6 +79,48 @@ async function mintDescriptor(
 ): Promise<CollectionEncryption> {
   const { keyAgreementKey } = await deriveIdentity({ seed })
   return mintRoster({ recipients: [ownerRecipient({ keyAgreementKey })] })
+}
+
+/**
+ * Opens a store with no descriptor and drops into it one envelope sealed under
+ * `encryption` by the identity derived from `seed` (what another client wrote
+ * under an epoch this store has not seen).
+ */
+async function openStoreWithForeignRow({
+  encryption,
+  seed = SEED
+}: {
+  encryption: CollectionEncryption
+  seed?: Uint8Array
+}): Promise<LocalStore> {
+  const { keyAgreementKey, keyResolver } = await deriveIdentity({ seed })
+  const cipher = await createDocCipher({
+    keyAgreementKey,
+    keyResolver,
+    collectionId: COLLECTION_ID,
+    encryption
+  })
+  const { id, envelope } = await cipher.encrypt({
+    data: { id: 'note-1', title: 'from another client' }
+  })
+  const store = await openStore()
+  await store.rxCollection(COLLECTION_KEY).insert({
+    id,
+    updatedAt: new Date().toISOString(),
+    data: envelope as unknown as Json
+  })
+  return store
+}
+
+/**
+ * A promise with its resolver held apart, so a test can settle it by hand.
+ */
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {}
+  const promise = new Promise<T>(settle => {
+    resolve = settle
+  })
+  return { promise, resolve }
 }
 
 afterEach(async () => {
@@ -237,6 +278,123 @@ describe('LocalStore epoch-descriptor refresh', () => {
       UnverifiedDescriptorError
     )
     expect(source.collectionEncryption).not.toHaveBeenCalled()
+  })
+
+  it('keeps a refusal across a source re-install until a governed one arrives', async () => {
+    // A reconnect installs the source again over the same store. A refusal
+    // recorded under the first source must not come back relabeled as the
+    // envelope's unknown epoch: re-arming the guard while dropping the
+    // refusal (or the reverse) is what would do that. The re-install does
+    // re-arm all three together, so once a governed source is installed the
+    // next unknown-epoch decrypt asks it rather than reusing the old answer.
+    const encryption = await mintDescriptor()
+    const store = await openStoreWithForeignRow({ encryption })
+    const first = descriptorSource(encryption, { plain: true })
+    store.setDescriptorSource(first)
+    await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow(
+      UnverifiedDescriptorError
+    )
+
+    const second = descriptorSource(encryption, { plain: true })
+    store.setDescriptorSource(second)
+    await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow(
+      UnverifiedDescriptorError
+    )
+    expect(first.collectionEncryption).not.toHaveBeenCalled()
+    expect(second.collectionEncryption).not.toHaveBeenCalled()
+
+    const governed = descriptorSource(encryption)
+    store.setDescriptorSource(governed)
+    const listed = await store.listEntities<{ id: string; title: string }>(
+      COLLECTION_KEY
+    )
+    expect(listed).toEqual([{ id: 'note-1', title: 'from another client' }])
+    expect(governed.collectionEncryption).toHaveBeenCalledTimes(1)
+  })
+
+  it('records a roster that excludes this app and surfaces it as KeyUnwrapError', async () => {
+    // The source answers a roster that lists the envelope's epoch but wraps
+    // no key to this app, so the rebuild throws `KeyUnwrapError` from inside
+    // the refresh. The source has spoken: the refresh is spent, the error is
+    // recorded like a refusal, and every decrypt of that epoch surfaces it as
+    // itself (not as the envelope's unknown epoch) without re-asking.
+    const foreign = await mintDescriptor(FOREIGN_SEED)
+    const store = await openStoreWithForeignRow({
+      encryption: foreign,
+      seed: FOREIGN_SEED
+    })
+    const source = descriptorSource(foreign)
+    store.setDescriptorSource(source)
+
+    await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow(
+      KeyUnwrapError
+    )
+    await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow(
+      KeyUnwrapError
+    )
+    expect(source.collectionEncryption).toHaveBeenCalledTimes(1)
+  })
+
+  it('logs a refresh that fails on the wire and re-asks next time', async () => {
+    // A dropped connection is not an answer: the failure is logged, the
+    // refresh is left un-spent, and the next unknown-epoch decrypt re-asks.
+    const encryption = await mintDescriptor()
+    const store = await openStoreWithForeignRow({ encryption })
+    const source = fakeDescriptorSource({
+      collectionEncryption: async () => {
+        throw new Error('connection dropped')
+      }
+    })
+    store.setDescriptorSource(source)
+
+    const capture = captureLogger('wr')
+    const previous = setLogger(capture.logger)
+    try {
+      await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow()
+      await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow()
+    } finally {
+      setLogger(previous)
+    }
+    expect(source.collectionEncryption).toHaveBeenCalledTimes(2)
+    const warned = capture.events.filter(event => event.level === 'warn')
+    expect(warned).toHaveLength(2)
+    expect(warned[0]?.data?.collectionId).toBe(COLLECTION_ID)
+  })
+
+  it('discards the bookkeeping of a refresh that outlives its source', async () => {
+    // A refresh is in flight against the first source when a reconnect
+    // installs a second one. The first source then answers a roster this app
+    // is not in. That outcome belongs to the retired source: recording it
+    // would make the next decrypt throw the stale error over a cipher the
+    // new source can rebuild.
+    const encryption = await mintDescriptor()
+    const foreign = await mintDescriptor(FOREIGN_SEED)
+    const store = await openStoreWithForeignRow({ encryption })
+
+    const asked = deferred<void>()
+    const answer = deferred<CollectionEncryption>()
+    const stale = fakeDescriptorSource({
+      collectionEncryption: () => {
+        asked.resolve()
+        return answer.promise
+      }
+    })
+    store.setDescriptorSource(stale)
+    const torn = store.listEntities(COLLECTION_KEY)
+    await asked.promise
+
+    const fresh = descriptorSource(encryption)
+    store.setDescriptorSource(fresh)
+    answer.resolve(foreign)
+    // The read torn by the swap fails against the stale cipher.
+    await expect(torn).rejects.toThrow()
+
+    // The next read asks the new source and recovers.
+    const listed = await store.listEntities<{ id: string; title: string }>(
+      COLLECTION_KEY
+    )
+    expect(listed).toEqual([{ id: 'note-1', title: 'from another client' }])
+    expect(fresh.collectionEncryption).toHaveBeenCalledTimes(1)
   })
 
   it('opens epoch-aware from a cached descriptor (no refresh needed)', async () => {

@@ -876,14 +876,21 @@ key epochs stays fail-closed, warned about plainly rather than surfacing later
 as per-row decrypt failures. The fetched descriptors are handed to
 `onDescriptorsFetched` (the offline descriptor cache) and the store's descriptor
 source is installed on the local store, so a decrypt that meets an unseen epoch
-(a rotation elsewhere) re-reads and rebuilds once per collection per session. An
-unseen epoch is the only signal that spends that refresh; a decrypt that fails
-because this app holds no key for an epoch the descriptor already lists surfaces
-as `KeyUnwrapError` and leaves the refresh untouched. Shared collections are
-handled apart from all of that: they never enter replication and never receive a
-declaration write, and instead one `SharedCollectionReader` is opened per
-configured shared collection the grants cover, concurrently, each failure a
-warn-and-skip.
+(a rotation elsewhere) re-reads and rebuilds once per collection per installed
+source. An unseen epoch is the only signal that spends that refresh; a decrypt
+that fails because this app holds no key for an epoch the descriptor already
+lists surfaces as `KeyUnwrapError` and leaves the refresh untouched. Installing
+a source (a reconnect runs the bootstrap again over the same store) re-arms the
+spent guard, the shared in-flight refresh, and the recorded refusals together,
+so the next unknown-epoch decrypt asks the new source. Re-arming one of the
+three without the others would surface a recorded refusal as a bare unknown
+epoch under the stale cipher. Every change to a collection's cipher (that
+refresh, the bootstrap's descriptor install, and the blinded-index schema
+install) runs on one per-collection chain, so a schema install cannot land on a
+cipher a concurrent rebuild then replaces. Shared collections are handled apart
+from all of that: they never enter replication and never receive a declaration
+write, and instead one `SharedCollectionReader` is opened per configured shared
+collection the grants cover, concurrently, each failure a warn-and-skip.
 
 ### The governed descriptor source
 
@@ -934,19 +941,28 @@ later one, rather than the envelope's unknown-epoch error. A governing log the
 source refuses to adopt (a forged or discontinuous chain) is treated the same
 way at both sites (one predicate, `isDescriptorRefusal`, classifies both kinds),
 since relabeling it as "not a recipient" or as a foreign envelope would hide a
-security signal. Any other refresh failure (a dropped connection) is logged and
-leaves the refresh un-spent, so the next unknown-epoch decrypt re-asks. The
-owner's controller view and the chain-head pins live together on one
-`SpaceTrust` (`src/storage/spaceTrust.ts`), created by the auth store per
-connected activation and handed to both the login-time read's store and the
-bootstrap's store (`fromGrants` takes it as `trust`), so the owner's log is
-fetched and verified once and a head served to the second store continues what
-the first pinned. The owner's own account log is pinned in the same store, so a
-resolution retried after a failed one continues the chain the first pinned
-rather than adopting whatever the host serves next. The pins are in memory:
-continuity is checked within a session, and a reload trusts the served head
-afresh. The owner resolution is kept only when it succeeds; a failed fetch is
-retried by the next read rather than remembered.
+security signal. A fetched roster that lists the epoch but wraps no key to this
+app (the rebuild raises `KeyUnwrapError`) is recorded the same way: the source
+has answered, so the refresh is spent and the decrypt surfaces `KeyUnwrapError`
+rather than the envelope's unknown epoch. Any other refresh failure (a dropped
+connection) is logged and leaves the refresh un-spent, so the next unknown-epoch
+decrypt re-asks. A refresh still in flight when another source is installed
+writes none of this bookkeeping; its outcome belongs to the retired source. The
+refresh's install and the bootstrap's install share one freshness gate: a roster
+the held cipher already matches, or an earlier head of the same log than the one
+the cipher was built from, is not swapped in, so two reads of one log settling
+in either order cannot move a collection backward. The owner's controller view
+and the chain-head pins live together on one `SpaceTrust`
+(`src/storage/spaceTrust.ts`), created by the auth store per connected
+activation and handed to both the login-time read's store and the bootstrap's
+store (`fromGrants` takes it as `trust`), so the owner's log is fetched and
+verified once and a head served to the second store continues what the first
+pinned. The owner's own account log is pinned in the same store, so a resolution
+retried after a failed one continues the chain the first pinned rather than
+adopting whatever the host serves next. The pins are in memory: continuity is
+checked within a session, and a reload trusts the served head afresh. The owner
+resolution is kept only when it succeeds; a failed fetch is retried by the next
+read rather than remembered.
 
 `readRemoteDescriptors` is the login-time counterpart. It acquires one
 descriptor per granted private collection before any replication exists, because
