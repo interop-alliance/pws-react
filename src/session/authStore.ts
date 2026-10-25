@@ -1107,12 +1107,20 @@ export function createAuthStore({
     // The replica swap: writes that arrive while no replica is attached wait
     // on it and land in the connected replica (or, on a failed activation, in
     // the re-opened anonymous one) once it is attached and hydrated. Only a
-    // merge opens one. Under `leave` the anonymous data is set aside, and a
-    // write composed against it must not follow it over: an `update` of a
-    // set-aside doc would find no envelope in the connected replica and
-    // resurrect it there as a create. Those writes reject instead, as every
-    // mid-transition write did before the swap existed.
-    if (adopt === 'merge') {
+    // merge that carries anonymous data over opens one, which is exactly the
+    // case `collectAdoptable` collects for: `adopt: 'merge'` from `local`.
+    // Under `leave` the anonymous data is set aside, and a write composed
+    // against it must not follow it over: an `update` of a set-aside doc would
+    // find no envelope in the connected replica and resurrect it there as a
+    // create. A login from `reconnect` collects nothing either, and a write
+    // composed against the expired account's replica must not be written into
+    // the newly connected account's as a create. Those writes reject instead,
+    // as every mid-transition write did before the swap existed.
+    const carriesAnonData =
+      adopt === 'merge' &&
+      snapshot.status === 'local' &&
+      snapshot.controllerDid !== null
+    if (carriesAnonData) {
       storageContext.beginSwap()
     }
     let source: AdoptSource | null

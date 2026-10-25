@@ -236,11 +236,15 @@ network half (owner log, collection logs, descriptor reads) runs before the swap
 opens, so the swap holds only local work. Library-driven reads (`hydrate`) stay
 on `requireStore`: they run inside the swap and must not wait on it.
 
-Only a merge opens a swap. Under `adopt: 'leave'` the anonymous data is set
-aside, and a write composed against it must not follow it over: an update of a
-set-aside document would find no envelope in the connected replica and be
-resurrected there as a create. A write that arrives mid-transition under `leave`
-rejects, as every such write did before the swap existed.
+Only a merge that carries anonymous data over opens a swap: `adopt: 'merge'`
+from `local`, the one case the adoption collect returns anything for. Under
+`adopt: 'leave'` the anonymous data is set aside, and a write composed against
+it must not follow it over: an update of a set-aside document would find no
+envelope in the connected replica and be resurrected there as a create. A login
+from `reconnect` collects nothing either, and a write composed against the
+expired account's replica must not be written into the newly connected account's
+as a create. A write that arrives mid-transition in either case rejects, as
+every such write did before the swap existed.
 
 The swap is serialized with the rest of the lifecycle. `login` keeps its wallet
 popup await off the lifecycle chain, but its connect epilogue (the swap) rides

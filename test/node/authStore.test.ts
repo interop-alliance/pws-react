@@ -597,6 +597,61 @@ describe('connectWithGrants()', () => {
     expect(rows.map(row => row.id)).not.toContain(kept.id)
   })
 
+  it('a login from reconnect opens no swap, so a write queued against the expired account rejects', async () => {
+    const config = baseConfig()
+    const seedA = await provisionedSeed()
+    const seedB = await provisionedSeed()
+    const connectedDbB = await connectedDbFor(config, seedB)
+    // Account A connects through the ungated boot-time path; the gate parks
+    // account B's open, the window a write queued mid-login would land in.
+    const gate = gatedStorage({ match: name => name === connectedDbB })
+    const store = createAuthStore({
+      config,
+      registry,
+      seedStore: newSeedStore(),
+      storage: gate.storage
+    })
+    liveStores.push(store)
+    await store.getState().boot()
+    await store
+      .getState()
+      .connectWithGrants({ seed: seedA, grants: noteGrants() })
+    expect(store.getState().status).toBe('connected')
+    const notes = createEntityStore<{ id: string; title: string }>('notes')
+    const kept = { id: crypto.randomUUID(), title: 'account A' }
+    await notes.getState().insert(kept)
+
+    store.getState().notifyAccessExpired()
+    expect(store.getState().status).toBe('reconnect')
+
+    const identityB = await deriveIdentity({ seed: seedB })
+    const grants = noteGrants()
+    loginWithWalletMock.mockResolvedValue({
+      seed: seedB,
+      identity: identityB,
+      grants,
+      parsed: parseGrants(grants),
+      expires: futureIso(FAR_FUTURE_MS),
+      firstRun: false
+    })
+    const loggingIn = store.getState().login()
+    await gate.entered
+    expect(hasStore()).toBe(false)
+    // Nothing is collected from `reconnect`, so no swap is open: the write
+    // meets the bare no-replica error rather than following account A's
+    // document into account B's replica as a create.
+    await expect(
+      notes.getState().update({ ...kept, title: 'edited mid-login' })
+    ).rejects.toThrow(/LocalStore is not initialized/)
+
+    gate.release()
+    expect(await loggingIn).toEqual({ firstRun: false })
+    expect(store.getState().status).toBe('connected')
+    expect(store.getState().controllerDid).toBe(identityB.controllerDid)
+    const rows = await requireStore().listEntities<{ id: string }>('notes')
+    expect(rows.map(row => row.id)).not.toContain(kept.id)
+  })
+
   it('transitions local to connected under the given seed', async () => {
     const store = makeStore(baseConfig(), newSeedStore())
     await store.getState().boot()

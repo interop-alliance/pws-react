@@ -27,6 +27,10 @@
   the throw rejected `startWasSync` as a whole and no collection replicated
   while the session stayed `connected`.
 
+- The connect transition's replica swap opens only for an `adopt: 'merge'` login
+  from `local`, the one case anonymous data is carried over. A write queued
+  during a login from `reconnect` now rejects instead of waiting on the swap and
+  landing in the newly connected account's replica as a create.
 - `reconnect()` runs its post-popup epilogue (controller stop, record persist,
   sync restart, `connected` transition) on the lifecycle chain and re-checks the
   session first. A `logout`, `clearLocalData`, or `destroy` completed while the
