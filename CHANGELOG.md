@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- `AdoptDialog` swallows the rejection of the `login({ adopt })` it starts. The
+  store already records a failed login on `useLogin().error`, so a wallet
+  without App Connect support or a failed activation no longer also escapes the
+  dialog as an unhandled rejection.
 - `LocalStore.setDescriptorSource` re-arms the refresh guard, the in-flight
   refresh, and the recorded refusals together, and a refresh that outlives its
   source records nothing.

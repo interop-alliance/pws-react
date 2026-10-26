@@ -32,7 +32,11 @@ export function AdoptDialog({
 
   function handleLogin(adopt: 'merge' | 'leave'): void {
     onClose()
-    void login({ adopt })
+    // A failed login (an unsupported wallet, a grant check, a failed
+    // activation) is already recorded by the store on `useLogin().error`,
+    // which the app's login screen renders. Swallow the rethrow here so it
+    // does not escape the dialog as an unhandled rejection.
+    login({ adopt }).catch(() => undefined)
   }
 
   return (

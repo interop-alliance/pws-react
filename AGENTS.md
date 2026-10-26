@@ -3,12 +3,13 @@
 ## Repository
 
 `@interop/was-react` is the reusable React plumbing for "Bring Your Own
-Everything" (BYOE) client-side apps on Portable Web Spaces (PWS, formerly Wallet Attached Storage / WAS): DID-Auth
-login via a CHAPI wallet, a seed-derived did:key identity, local-first encrypted
-storage (an RxDB/Dexie replica of per-collection EDV envelopes), and background
-sync to a WAS server. It wraps `@interop/was-client` and was extracted from a
-production BYOE app. An app supplies a `WasAppConfig` and a `StoreRegistry` and
-owns its own domain and UI; the library owns everything from login through sync.
+Everything" (BYOE) client-side apps on Portable Web Spaces (PWS, formerly Wallet
+Attached Storage / WAS): DID-Auth login via a CHAPI wallet, a seed-derived
+did:key identity, local-first encrypted storage (an RxDB/Dexie replica of
+per-collection EDV envelopes), and background sync to a WAS server. It wraps
+`@interop/was-client` and was extracted from a production BYOE app. An app
+supplies a `WasAppConfig` and a `StoreRegistry` and owns its own domain and UI;
+the library owns everything from login through sync.
 
 The directory map, the session state machine, the Login With Wallet (App
 Connect) protocol explainer, and the storage/sync layers live in
@@ -161,8 +162,8 @@ Two homes, both run by Vitest, and the include pattern in `vite.config.ts` is
 `['test/node/**/*.test.{ts,tsx}', 'src/**/*.test.{ts,tsx}']`:
 
 - `test/node/` -- integration-shaped Vitest suites (the auth store lifecycle,
-  the shared-collection reader, `documentApp`, `ProtectedRoute`, sync
-  controller, `writerId`).
+  the shared-collection reader, `documentApp`, `ProtectedRoute`, `AdoptDialog`,
+  sync controller, `writerId`).
 - `src/**/*.test.ts` (and `.tsx`) -- unit suites colocated with their subject
   (`src/auth/`, `src/identity/`, `src/storage/`, `src/config.ts`,
   `src/grants.ts`). Adding one here is normal and safe; the build's exclude
