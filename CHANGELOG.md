@@ -27,6 +27,11 @@
   the throw rejected `startWasSync` as a whole and no collection replicated
   while the session stayed `connected`.
 
+- The adopted anonymous replica is removed before its seed is cleared. The
+  database goes through the wipe executor (so the Dexie shells RxDB's removal
+  leaves standing go with it), and the seed is cleared only when nothing failed.
+  Before, the seed was cleared first, so a failed removal (another tab holding
+  the database) orphaned the replica under a name no later run could derive.
 - The connect transition's replica swap opens only for an `adopt: 'merge'` login
   from `local`, the one case anonymous data is carried over. A write queued
   during a login from `reconnect` now rejects instead of waiting on the swap and

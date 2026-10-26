@@ -117,8 +117,12 @@ ordering is load-bearing: holding the live store and the collect handle at once
 would double the open-collection count and trip RxDB's process-wide cap. The
 payloads are LWW-merged into the connected replica before its first hydrate and
 before sync starts -- so they enter the entity stores by ordinary hydration and
-reach the server as ordinary creates -- and the anonymous seed and database are
-deleted once the activation lands. The merge policy is per logical uuid and
+reach the server as ordinary creates -- and the anonymous replica is discarded
+once the activation lands: its database first, through the wipe executor at a
+one-name grade, and its seed last, only when the removal reported no failure.
+The database is named through the seed, so a seed cleared ahead of a failed
+removal would orphan it; kept, it re-opens as the next `local` replica and a
+later merge login collects it again. The merge policy is per logical uuid and
 deterministic: insert when the connected replica holds nothing under that uuid;
 otherwise replace only when the adopted payload wins the same
 `remotePayloadWins` last-write-wins rule replication runs (owned by

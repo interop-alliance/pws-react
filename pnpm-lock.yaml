@@ -36,8 +36,8 @@ importers:
         specifier: ^4.0.0
         version: 4.0.0
       '@interop/vh-resource-log':
-        specifier: ^0.8.1
-        version: 0.8.1
+        specifier: ^0.9.0
+        version: 0.9.0
       '@interop/wallet-core':
         specifier: ^0.107.0
         version: 0.107.0(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))
@@ -877,6 +877,10 @@ packages:
     resolution: {integrity: sha512-yoBABfWtLwcUK8caPXKlPPNjq6AX4/SUJ/JRwa0ps8ihuxVfqwz6sMKbsvMDmVrLLjSOApY0innoTIDrtRGjrg==}
     engines: {node: '>=22.0'}
 
+  '@interop/storage-core@0.38.0':
+    resolution: {integrity: sha512-wavRRv4uzKz9m21sdfZtOGeBy8TSgYWRgHTfq+SE7Dak/E2u77xmn4x7EaV4q3sPgmjFhSbz+YlzG6WpQor3mA==}
+    engines: {node: '>=22.0'}
+
   '@interop/vc-bitstring-status-list@3.4.1':
     resolution: {integrity: sha512-aDosf9z9H/7r3iVknLQ5LQjBVSgD1hypACuF+IarwChoCEyBknKIynJ/tHhYwx7tT7ELzkxC97+thN53p4wW/A==}
     engines: {node: '>=24.0'}
@@ -891,6 +895,10 @@ packages:
 
   '@interop/vh-resource-log@0.8.1':
     resolution: {integrity: sha512-4w+yKQXWImZHvntW4f+DO0u7oe31dC319R+uHnjaRSjaUEx2SgDwdKnFEuVrU5xBGTqF2GGias8LLxq7keWT2Q==}
+    engines: {node: '>=24.0'}
+
+  '@interop/vh-resource-log@0.9.0':
+    resolution: {integrity: sha512-9QP1XExxu95IuHlB3b9V3QKAKF4tLbp+agF4YByVlywgWcSrUCRD9YxYctacummgPIQTTV+iKBMZJIu72i8OnQ==}
     engines: {node: '>=24.0'}
 
   '@interop/wallet-core@0.107.0':
@@ -3994,6 +4002,10 @@ snapshots:
     dependencies:
       '@interop/data-integrity-core': 8.8.0
 
+  '@interop/storage-core@0.38.0':
+    dependencies:
+      '@interop/data-integrity-core': 8.9.0
+
   '@interop/vc-bitstring-status-list@3.4.1':
     dependencies:
       '@digitalbazaar/bitstring': 3.1.0
@@ -4037,6 +4049,11 @@ snapshots:
     dependencies:
       '@interop/did-method-webvh': 5.17.0
       '@interop/storage-core': 0.36.0
+
+  '@interop/vh-resource-log@0.9.0':
+    dependencies:
+      '@interop/did-method-webvh': 5.17.0
+      '@interop/storage-core': 0.38.0
 
   '@interop/wallet-core@0.107.0(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))':
     dependencies:

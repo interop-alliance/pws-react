@@ -56,7 +56,7 @@
     "@interop/social-core": "^0.8.1",
     "@interop/vc": "^11.1.2",
     "@interop/verifier-core": "^4.0.0",
-    "@interop/vh-resource-log": "^0.8.1",
+    "@interop/vh-resource-log": "^0.9.0",
     "@interop/wallet-core": "^0.107.0",
     "@interop/wallet-request": "^0.5.2",
     "@interop/was-client": "^0.98.0",

@@ -1087,10 +1087,13 @@ describe('adoption', () => {
     expect(await anon.loadSeed()).toEqual(anonSeed)
   })
 
-  it('stays connected when the adopted anon replica cannot be deleted', async () => {
+  it('stays connected and keeps the anon seed when the adopted replica cannot be deleted', async () => {
     const config = baseConfig()
     const store = makeStore(config, newSeedStore())
     await store.getState().boot()
+    const anon = createSeedStore({ dbName: `${config.dbName}-anon` })
+    const anonSeed = await anon.loadSeed()
+    const anonDid = store.getState().controllerDid!
     await requireStore().insertEntity('notes', {
       id: crypto.randomUUID(),
       title: 'adopt-me'
@@ -1121,10 +1124,18 @@ describe('adoption', () => {
       capture.events.some(
         event =>
           event.level === 'warn' &&
-          event.msg.includes('Failed to delete the adopted anonymous replica')
+          event.msg.includes(
+            'The adopted anonymous replica was not fully removed'
+          )
       )
     ).toBe(true)
     setLogger(previous)
+    // The seed is cleared LAST, and not at all after a failed removal, so the
+    // database it names stays reachable: the next local replica re-opens
+    // under the same identity instead of orphaning the old one.
+    expect(await anon.loadSeed()).toEqual(anonSeed)
+    await store.getState().logout()
+    expect(store.getState().controllerDid).toBe(anonDid)
   })
 
   it('collects the pre-login data even when a destroy lands mid-login', async () => {

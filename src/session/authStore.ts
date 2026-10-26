@@ -1030,29 +1030,51 @@ export function createAuthStore({
   }
 
   /**
-   * Deletes the adopted anonymous replica -- its persisted seed and its
-   * per-controller database -- so the data lives on only in the connected
-   * replica and a later logout lands in a genuinely fresh `local`. Called only
-   * after the connected activation has landed (status written); any earlier
-   * failure leaves the anonymous replica intact for the fallback to re-open.
+   * Deletes the adopted anonymous replica -- its per-controller database, the
+   * Dexie shells RxDB's own removal leaves standing, and LAST its persisted
+   * seed -- so the data lives on only in the connected replica and a later
+   * logout lands in a genuinely fresh `local`. Called only after the connected
+   * activation has landed (status written); any earlier failure leaves the
+   * anonymous replica intact for the fallback to re-open.
+   *
+   * The database goes through the wipe executor at the one-name grade (no seed
+   * store, no prefix sweep, no writer id), and the seed is cleared only once
+   * the executor reports nothing failed. The order is what keeps a lingering
+   * replica reachable: the database is named through the seed, so a seed
+   * cleared ahead of a removal that then failed would orphan the database for
+   * good. Kept, it re-opens as the next `local` replica, and a later merge
+   * login collects it again. That re-collection is a repeat of this one, not a
+   * no-op: a payload the connected account deleted meanwhile is re-inserted.
    *
    * Best-effort: a deletion failure (an anonymous Dexie database still open in
    * another tab, an IndexedDB quota error) is logged and swallowed. The
    * connected session is already live and syncing at this point, so failing
    * the login over its cleanup would report `local` over a genuinely connected
-   * session; at worst a stale anonymous replica lingers and its (already
-   * merged) payloads are re-collected by a later login's idempotent LWW merge.
+   * session.
    *
    * @param controllerDid {string}   the anonymous controller DID
    * @returns {Promise<void>}
    */
   async function discardAnonReplica(controllerDid: string): Promise<void> {
+    const replicaDbName = dbNameForController({ dbName, controllerDid })
     try {
-      await anonStore.clearSeedStore()
-      await LocalStore.removeDatabase({
-        dbName: dbNameForController({ dbName, controllerDid }),
+      const report = await executeLocalWipe({
+        targets: {
+          replicaDbNames: [replicaDbName],
+          seedStoreDbNames: [],
+          idbNamePrefixes: [],
+          storageKeyPrefix: null
+        },
         ...(storage && { storage })
       })
+      if (report.failed.length > 0) {
+        log.warn(
+          'The adopted anonymous replica was not fully removed; its seed is kept so a later run can still name it',
+          { dbName: replicaDbName, failed: report.failed }
+        )
+        return
+      }
+      await anonStore.clearSeedStore()
     } catch (err) {
       log.warn('Failed to delete the adopted anonymous replica', { err })
     }
