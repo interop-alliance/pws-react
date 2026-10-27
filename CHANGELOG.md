@@ -12,14 +12,25 @@
 
 ### Fixed
 
+- An epoch-roster entry that names this app but fails its key-wrap check
+  (`IntegrityError` from `@interop/was-client` 0.99.1) is routed as a tamper
+  signal: the local store records it as the collection's spent refusal, and the
+  shared-collection reader surfaces it as itself rather than as "not a
+  recipient".
 - A boot over a persisted session whose grants have expired lands `reconnect`
   over the connected replica, with the seed intact and no replication started,
   instead of wiping the session and landing an anonymous `local` replica with no
   reconnect banner. The replica opens on the cached descriptors alone, and
   `reconnect()` renews the grants, persists the record, and starts sync. When
-  that expired restore fails to open the replica (a cached roster that no longer
-  wraps a key to this app), the record is cleared, so the session lands a clean
-  `local` rather than re-running the failed bring-up on every reload.
+  that expired restore fails with `KeyUnwrapError` or `IntegrityError` (a cached
+  roster that no longer wraps a key to this app, or whose entry for it fails its
+  key-wrap check), the record is cleared, so the session lands a clean `local`
+  rather than re-running the failed bring-up on every reload; any other failure
+  keeps the record for a reload or the reconnect to repair.
+- A singleton duplicate that another client tombstoned while a hydrate was
+  reconciling it is no longer re-removed or warned about, and `deleteEntity` no
+  longer rewrites a tombstone a pull landed under it. A winner tombstoned while
+  its losers were being removed is warned about.
 - `login` resolves `null` instead of connecting when the session changed while
   the wallet popup was open (a provider unmount with no re-mount, a
   `clearLocalData`, a `connectWithGrants`). A sync-controller stop that throws
@@ -78,6 +89,13 @@
   pull now returns `snapshot: false` with the pages it did read, and the
   checkpoint stays at the last fully read page. A consumer applying the partial
   set as a snapshot would have dropped every post the cut kept it from reading.
+- `hydrateSingleton` tombstones a duplicate row with a conditional write on the
+  revision it read, and `deleteEntity` removes through RxDB's incremental write
+  queue, so a pull that updated or tombstoned the row after it was read (the
+  singleton decrypts can wait on a descriptor refresh) no longer fails the call
+  with a storage conflict. A duplicate whose row moved meanwhile is skipped with
+  a warning and reconciled by the next hydrate rather than removed unweighed,
+  and a winner whose row moved tombstones no loser at all.
 
 ## 0.30.0 - 2026-10-12
 

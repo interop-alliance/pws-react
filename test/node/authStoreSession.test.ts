@@ -24,6 +24,7 @@ import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import type { IZcap } from '@interop/data-integrity-core'
+import { IntegrityError } from '@interop/was-client/sync'
 import {
   createAuthStore,
   type WasAuthStore
@@ -50,6 +51,7 @@ import {
   startWasSync
 } from '../../src/storage/wasSync.js'
 import { hasStore, requireStore } from '../../src/storage/storageManager.js'
+import { StorageContext } from '../../src/storage/storageContext.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../../src/log.js'
 import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
@@ -466,22 +468,20 @@ describe('boot() over an expired persisted session', () => {
    *
    * `collections` defaults to `notes` alone, granted and cached. The offline
    * descriptor cache an earlier connected session left behind is written for
-   * the ids in `cached` (the mocked descriptor read answers "no descriptor",
-   * so it is the only source either boot opens a cipher from), wrapped to the
-   * session identity unless `cacheRecipient` names another key. The first
-   * connected boot and its write are skipped under `connectFirst: false`, for
-   * a cache the replica cannot open at all.
+   * `notes` only (the mocked descriptor read answers "no descriptor", so it is
+   * the only source either boot opens a cipher from), wrapped to the session
+   * identity unless `cacheRecipient` names another key; such a cache cannot
+   * be opened at all, so the first connected boot and its write are skipped.
+   * `failExpiredBoot` makes the expired boot's hydrate reject with it.
    */
   async function expiredSession({
     collections = [{ key: 'notes', id: 'notes' }],
-    cached = ['notes'],
     cacheRecipient,
-    connectFirst = true
+    failExpiredBoot
   }: {
     collections?: { key: string; id: string }[]
-    cached?: string[]
     cacheRecipient?: IdentityAgents['keyAgreementKey']
-    connectFirst?: boolean
+    failExpiredBoot?: Error
   } = {}) {
     const config = baseConfig(collections)
     const seedStore = newSeedStore()
@@ -491,14 +491,12 @@ describe('boot() over an expired persisted session', () => {
       store: seedStore,
       controller: identity.controllerDid
     })
-    for (const collectionId of cached) {
-      await cache.writeDescriptor({
-        collectionId,
-        descriptor: await mintRecordEncryption({
-          keyAgreementKey: cacheRecipient ?? identity.keyAgreementKey
-        })
+    await cache.writeDescriptor({
+      collectionId: 'notes',
+      descriptor: await mintRecordEncryption({
+        keyAgreementKey: cacheRecipient ?? identity.keyAgreementKey
       })
-    }
+    })
     const session = await sessionRecord({
       seed,
       grants: collections.map(
@@ -511,7 +509,7 @@ describe('boot() over an expired persisted session', () => {
       expires: futureIso(FAR_FUTURE_MS)
     })
     await persistAppSession({ session, store: seedStore })
-    if (connectFirst) {
+    if (cacheRecipient === undefined) {
       const first = createAuthStore({ config, registry, seedStore })
       liveStores.push(first)
       await first.getState().boot()
@@ -528,6 +526,11 @@ describe('boot() over an expired persisted session', () => {
     const readsBefore = readRemoteDescriptorsMock.mock.calls.length
     const store = createAuthStore({ config, registry, seedStore })
     liveStores.push(store)
+    if (failExpiredBoot) {
+      vi.spyOn(StorageContext.prototype, 'hydrateAll').mockRejectedValueOnce(
+        failExpiredBoot
+      )
+    }
     await store.getState().boot()
     return { store, seedStore, seed, identity, syncStartsBefore, readsBefore }
   }
@@ -585,8 +588,7 @@ describe('boot() over an expired persisted session', () => {
       seed: crypto.getRandomValues(new Uint8Array(32))
     })
     const { store, seedStore } = await expiredSession({
-      cacheRecipient: other.keyAgreementKey,
-      connectFirst: false
+      cacheRecipient: other.keyAgreementKey
     })
 
     expect(store.getState().status).toBe('local')
@@ -596,6 +598,36 @@ describe('boot() over an expired persisted session', () => {
     // anonymous `local`, and the next login brings the same seed back.
     expect(await seedStore.loadSeed()).toBeNull()
     expect((await peekAppSession({ store: seedStore })).record).toBeNull()
+  })
+
+  it('clears the record when the expired activation fails with IntegrityError', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // The cached roster's entry for this app fails its key-wrap check, which
+    // the cipher build raises eagerly. Like a roster that wraps no key to
+    // this app, that repeats on every reload, so the record goes.
+    const { store, seedStore } = await expiredSession({
+      failExpiredBoot: new IntegrityError('corrupt recipient entry')
+    })
+
+    expect(store.getState().status).toBe('local')
+    expect(store.getState().error).not.toBeNull()
+    expect(await seedStore.loadSeed()).toBeNull()
+    expect((await peekAppSession({ store: seedStore })).record).toBeNull()
+  })
+
+  it('keeps the record when the expired activation fails for another reason', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // The hydrate fails on a storage error. Unlike a roster that wraps no key
+    // to this app, that is not known to repeat, so the record stays for a
+    // reload or a reconnect to try again.
+    const { store, seedStore, seed } = await expiredSession({
+      failExpiredBoot: new Error('database closed')
+    })
+
+    expect(store.getState().status).toBe('local')
+    expect(store.getState().error).not.toBeNull()
+    expect(await seedStore.loadSeed()).toEqual(seed)
+    expect((await peekAppSession({ store: seedStore })).record).not.toBeNull()
   })
 
   it('reconnect() renews the grants, persists the record, and starts replication', async () => {

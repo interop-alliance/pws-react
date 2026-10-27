@@ -24,11 +24,16 @@ import {
   UnverifiedDescriptorError
 } from '@interop/was-client/edv'
 import { captureLogger } from '@interop/logger'
+import { isIntegrityError } from '@interop/was-client/sync'
 import type { CollectionEncryption } from '@interop/was-client'
 import { LocalStore } from '../../src/storage/localStore.js'
 import type { Json } from '@interop/was-sync'
 import { createDocCipher } from '../../src/storage/docCipher.js'
-import { FOREIGN_SEED, mintRoster } from '../fixtures/roster.js'
+import {
+  corruptRecipientEntry,
+  FOREIGN_SEED,
+  mintRoster
+} from '../fixtures/roster.js'
 import { fakeDescriptorSource } from '../fixtures/descriptorSource.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import type { WasCollectionConfig } from '../../src/config.js'
@@ -331,6 +336,35 @@ describe('LocalStore epoch-descriptor refresh', () => {
     )
     await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow(
       KeyUnwrapError
+    )
+    expect(source.collectionEncryption).toHaveBeenCalledTimes(1)
+  })
+
+  it('records a roster entry that fails its key-wrap check and surfaces it as IntegrityError', async () => {
+    // The source answers a roster that names this app in the envelope's
+    // epoch, but the wrapped epoch key in that entry fails its AES-KW
+    // integrity check (a corrupt or tampered entry), so the rebuild throws
+    // `IntegrityError` from inside the refresh. The source has spoken, and a
+    // re-read of the same log serves the same entry: the refresh is spent,
+    // the error is recorded like a refusal, and every later decrypt surfaces
+    // it as itself without re-reading and rebuilding against the same
+    // damaged entry.
+    const encryption = await mintDescriptor()
+    const { keyAgreementKey } = await deriveIdentity({ seed: SEED })
+    const store = await openStoreWithForeignRow({ encryption })
+    const source = descriptorSource(
+      corruptRecipientEntry({
+        descriptor: encryption,
+        kid: keyAgreementKey.id
+      })
+    )
+    store.setDescriptorSource(source)
+
+    await expect(store.listEntities(COLLECTION_KEY)).rejects.toSatisfy(
+      isIntegrityError
+    )
+    await expect(store.listEntities(COLLECTION_KEY)).rejects.toSatisfy(
+      isIntegrityError
     )
     expect(source.collectionEncryption).toHaveBeenCalledTimes(1)
   })

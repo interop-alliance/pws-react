@@ -16,8 +16,10 @@
  */
 import {
   acquireDescriptor,
+  isKeyUnwrapError,
   UnverifiedDescriptorError
 } from '@interop/was-client/edv'
+import { isIntegrityError } from '@interop/was-client/sync'
 import { isResourceLogRefusal } from '@interop/vh-resource-log'
 import type {
   EncryptionDescriptorCache,
@@ -91,6 +93,23 @@ export function fetchErrorSink(): {
  */
 export function isDescriptorRefusal(err: unknown): err is Error {
   return err instanceof UnverifiedDescriptorError || isResourceLogRefusal(err)
+}
+
+/**
+ * Whether a cipher build failed on the roster's own answer about this app: it
+ * lists the epoch but wraps no key to this app (`KeyUnwrapError`), or its
+ * entry for this app fails its key-wrap check (`IntegrityError`, a corrupt or
+ * tampered entry). Either repeats on every retry against the same roster, so
+ * a caller spends no further read on it: the refresh guard records it, and an
+ * expired restore clears the record that would re-run the same bring-up.
+ *
+ * @param err {unknown}
+ * @returns {boolean}
+ */
+export function isRosterEntryFailure(err: unknown): err is Error {
+  return (
+    err instanceof Error && (isKeyUnwrapError(err) || isIntegrityError(err))
+  )
 }
 
 /**

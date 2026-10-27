@@ -26,7 +26,11 @@ import {
 } from '@interop/was-client/edv'
 import type { CollectionEncryption } from '@interop/was-client'
 import { fakeRemoteStore } from '../fixtures/remoteStore.js'
-import { mintRoster, rotateRoster } from '../fixtures/roster.js'
+import {
+  corruptRecipientEntry,
+  mintRoster,
+  rotateRoster
+} from '../fixtures/roster.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import { createDocCipher } from '../../src/storage/docCipher.js'
 import {
@@ -258,6 +262,115 @@ describe('SharedCollectionReader', () => {
         collectionId: COLLECTION_ID
       })
     ).rejects.toThrow(/not a recipient of any of its key epochs/)
+  })
+
+  it('surfaces IntegrityError for a roster entry that fails its key-wrap check at open', async () => {
+    // The roster names this app in its current epoch, but the entry's
+    // wrapped epoch key fails its AES-KW integrity check. The build resolves
+    // the write epoch eagerly and raises `IntegrityError` for it, which is a
+    // corrupt or tampered entry rather than a share this app lacks, so it
+    // surfaces as itself rather than as "not a recipient".
+    const app = await deriveIdentity({ seed: APP_SEED })
+    const owner = await deriveIdentity({ seed: OWNER_SEED })
+    const sound = await mintRoster({
+      recipients: [
+        ownerRecipient({ keyAgreementKey: owner.keyAgreementKey }),
+        x25519RecipientFromDidKey({ did: app.controllerDid })
+      ]
+    })
+    const encryption = corruptRecipientEntry({
+      descriptor: sound,
+      kid: app.keyAgreementKey.id
+    })
+    const open = SharedCollectionReader.open({
+      remoteStore: fakeRemoteStore({
+        collectionId: COLLECTION_ID,
+        encryption,
+        resources: {}
+      }),
+      keyAgreementKey: app.keyAgreementKey,
+      keyResolver: app.keyResolver,
+      collectionId: COLLECTION_ID
+    })
+    await expect(open).rejects.toSatisfy(isIntegrityError)
+    await expect(open).rejects.not.toThrow(SharedCollectionUnavailableError)
+  })
+
+  it('surfaces IntegrityError for a lazily unwrapped epoch whose entry fails its key-wrap check', async () => {
+    // Two epochs. The current one is sound, so the reader opens; the earlier
+    // one names this app with an entry that fails its key-wrap check, which
+    // the cipher only unwraps on the first decrypt of an envelope sealed
+    // under it. That decrypt raises `IntegrityError`, routed as a mis-bound
+    // envelope is: `get()` propagates it, a listing skips the resource with
+    // an `error` log and returns the rest.
+    const app = await deriveIdentity({ seed: APP_SEED })
+    const owner = await deriveIdentity({ seed: OWNER_SEED })
+    const extra = await deriveIdentity({ seed: EXTRA_SEED })
+    const extraRecipient = x25519RecipientFromDidKey({
+      did: extra.controllerDid
+    })
+    const first = await mintRoster({
+      recipients: [
+        ownerRecipient({ keyAgreementKey: owner.keyAgreementKey }),
+        x25519RecipientFromDidKey({ did: app.controllerDid }),
+        extraRecipient
+      ]
+    })
+    const rotated = await rotateRoster({
+      descriptor: first,
+      removeKid: extraRecipient.id
+    })
+    const encryption = corruptRecipientEntry({
+      descriptor: rotated,
+      kid: app.keyAgreementKey.id,
+      epochId: first.currentEpoch
+    })
+    const firstCipher = await createDocCipher({
+      keyAgreementKey: owner.keyAgreementKey,
+      keyResolver: owner.keyResolver,
+      collectionId: COLLECTION_ID,
+      encryption: first
+    })
+    const rotatedCipher = await createDocCipher({
+      keyAgreementKey: owner.keyAgreementKey,
+      keyResolver: owner.keyResolver,
+      collectionId: COLLECTION_ID,
+      encryption: rotated
+    })
+    const damaged = await firstCipher.encrypt({
+      data: { id: 'credential-1', title: 'under the damaged epoch' }
+    })
+    const readable = { id: 'credential-2', title: 'under the sound epoch' }
+    const sound = await rotatedCipher.encrypt({ data: readable })
+
+    const capture = captureLogger('wr')
+    const previous = setLogger(capture.logger)
+    try {
+      const reader = await SharedCollectionReader.open({
+        remoteStore: fakeRemoteStore({
+          collectionId: COLLECTION_ID,
+          encryption,
+          resources: {
+            [damaged.id]: damaged.envelope,
+            [sound.id]: sound.envelope
+          }
+        }),
+        keyAgreementKey: app.keyAgreementKey,
+        keyResolver: app.keyResolver,
+        collectionId: COLLECTION_ID
+      })
+
+      await expect(reader.get(damaged.id)).rejects.toSatisfy(isIntegrityError)
+      expect(await reader.list()).toEqual([{ id: sound.id, data: readable }])
+      const skips = capture.events.filter(
+        event =>
+          event.level === 'error' &&
+          event.msg.includes('Skipping a resource of a shared collection')
+      )
+      expect(skips).toHaveLength(1)
+    } finally {
+      setLogger(previous)
+    }
   })
 
   it('skips a body that is not an EDV envelope', async () => {

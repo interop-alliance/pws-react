@@ -43,7 +43,11 @@ import type { Json } from '@interop/was-sync'
  * reverses either, given the resource id the envelope is stored under -- the
  * caller's own row/resource id, not anything read out of the decrypted
  * payload, since the server controls that field -- and raises `IntegrityError`
- * when the envelope does not verify against it. An EDV (key-epoch) cipher also
+ * when the envelope does not verify against it. An EDV (key-epoch) cipher
+ * raises `IntegrityError` for one more reason: the roster's entry for this app
+ * fails its key-wrap check, eagerly from {@link createDocCipher} for the write
+ * epoch and on first decrypt for a lazily unwrapped read epoch (a malformed
+ * entry, or no entry at all, is `KeyUnwrapError`). An EDV cipher also
  * surfaces the `epoch` id it encrypted under, which rides the content push as
  * the `Key-Epoch` header; the plaintext codec returns none.
  *

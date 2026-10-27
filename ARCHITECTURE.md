@@ -84,18 +84,21 @@ Four states (`SessionStatus`):
   `boot`, when the persisted session's grants have already expired or no longer
   cover every configured collection.
 
-A hot restore never wipes the persisted session over its expiry. The seed is
-what the connected replica is encrypted under, and only the grants need
-renewing, so a reload after the grants ran out overnight opens that replica on
-the cached descriptors alone (expired grants invoke nothing, so no live
-descriptor read is attempted), starts no replication, and lands `reconnect`
-behind the banner. `reconnect()` then renews the grants, persists the record,
-and starts sync, as it does from a live session. Only a logout or a clear-data
-removes the seed, with one exception: an expired restore whose activation fails
-(a cached roster that no longer wraps a key to this app) clears the record. The
-activation has landed `local`, where nothing can renew the grants, so a kept
-record would only re-run the failed bring-up on every reload. The wallet returns
-the same seed on the next login.
+A hot restore keeps the persisted session over its expiry. The seed is what the
+connected replica is encrypted under, and only the grants need renewing, so a
+reload after the grants ran out overnight opens that replica on the cached
+descriptors alone (expired grants invoke nothing, so no live descriptor read is
+attempted), starts no replication, and lands `reconnect` behind the banner.
+`reconnect()` then renews the grants, persists the record, and starts sync, as
+it does from a live session. Only a logout or a clear-data removes the seed,
+with one exception: an expired restore whose activation fails with
+`KeyUnwrapError` (a cached roster that no longer wraps a key to this app) or
+`IntegrityError` (a cached roster whose entry for this app fails its key-wrap
+check) clears the record. Either failure repeats on every reload, and the
+activation has landed `local`, where nothing can renew the grants. The wallet
+returns the same seed on the next login. Any other failure of an expired restore
+(an IndexedDB error, a collection left fail-closed by a missing cache entry)
+keeps the record, since a reload or the reconnect bootstrap can repair it.
 
 ### The anonymous local-first replica
 
@@ -665,15 +668,22 @@ skipped with a warning rather than treated as corruption, alongside the other
 expected non-results (a body that is not an EDV envelope; an envelope left
 unreadable after the reader has spent its one descriptor refresh; an envelope
 whose listed epoch this app has no key for, which is what a mid-session revoke
-looks like). `IntegrityError` is deliberately not on that list: an envelope
-served under a resource id it was not sealed for is the server serving one
-document's content under another's URL, so `get()` rethrows it rather than
-answering `undefined`, which the caller would read as "not there". A listing
-skips it instead, logged at `error` rather than `warn` because it is never
-expected: one mis-bound envelope must not make a wallet-owned collection this
-app can neither repair nor route around unlistable. Every other failure -- no
-covering grant, no identity key supplied, not a recipient -- degrades one reader
-with a warning and never the session.
+looks like). `IntegrityError` is deliberately not on that list. It has two
+sources. An envelope served under a resource id it was not sealed for is the
+server serving one document's content under another's URL. And a roster entry
+that names this app but whose wrapped epoch key fails its key-wrap check is a
+corrupt or tampered entry (was-client raises it for that since 0.99.1; a
+malformed entry, or no entry at all, stays `KeyUnwrapError`). The write epoch's
+entry is checked when the cipher is built, so at open that error is rethrown as
+itself, ahead of `SharedCollectionUnavailableError`, like a descriptor refusal.
+A read epoch's entry is checked on the first decrypt of an envelope sealed under
+it, so there it surfaces per envelope, routed as a mis-bound envelope is:
+`get()` rethrows it rather than answering `undefined`, which the caller would
+read as "not there". A listing skips it instead, logged at `error` rather than
+`warn` because it is never expected: one mis-bound envelope must not make a
+wallet-owned collection this app can neither repair nor route around unlistable.
+Every other failure -- no covering grant, no identity key supplied, not a
+recipient -- degrades one reader with a warning and never the session.
 
 The other standing limit is the one the wallet states too: removing access stops
 future reads but cannot take back what has already been read.
@@ -820,7 +830,9 @@ id. The closure does not read an id out of the decrypted payload: the server
 controls that field, and on a private (random-id) collection it is a different,
 logical uuid anyway. The cipher checks the envelope against the id it was given
 and raises `IntegrityError` on a mismatch (an envelope sealed for a different
-resource than the one it is read under). was-sync keeps that separate from its
+resource than the one it is read under), and raises the same error when the
+roster's entry for this app in the envelope's epoch fails its key-wrap check (a
+corrupt or tampered entry). was-sync keeps that separate from its
 undecryptable-side handling: on a private collection the error propagates out of
 conflict resolution, and the collection's replication cycle fails the same way
 any other fatal conflict-resolution error does, reported through `onStatus` as
@@ -987,25 +999,34 @@ since relabeling it as "not a recipient" or as a foreign envelope would hide a
 security signal. A fetched roster that lists the epoch but wraps no key to this
 app (the rebuild raises `KeyUnwrapError`) is recorded the same way: the source
 has answered, so the refresh is spent and the decrypt surfaces `KeyUnwrapError`
-rather than the envelope's unknown epoch. Any other refresh failure (a dropped
-connection) is logged and leaves the refresh un-spent, so the next unknown-epoch
-decrypt re-asks. A refresh still in flight when another source is installed
-writes none of this bookkeeping; its outcome belongs to the retired source. The
-refresh's install and the bootstrap's install share one freshness gate: a roster
-the held cipher already matches, or an earlier head of the same log than the one
-the cipher was built from, is not swapped in, so two reads of one log settling
-in either order cannot move a collection backward. The owner's controller view
-and the chain-head pins live together on one `SpaceTrust`
-(`src/storage/spaceTrust.ts`), created by the auth store per connected
-activation and handed to both the login-time read's store and the bootstrap's
-store (`fromGrants` takes it as `trust`), so the owner's log is fetched and
-verified once and a head served to the second store continues what the first
-pinned. The owner's own account log is pinned in the same store, so a resolution
-retried after a failed one continues the chain the first pinned rather than
-adopting whatever the host serves next. The pins are in memory: continuity is
-checked within a session, and a reload trusts the served head afresh. The owner
-resolution is kept only when it succeeds; a failed fetch is retried by the next
-read rather than remembered.
+rather than the envelope's unknown epoch. So is a fetched roster whose entry for
+this app fails its key-wrap check (the rebuild raises `IntegrityError`, eagerly
+for the write epoch): a re-read of the same log serves the same entry, so
+un-arming the guard would only re-read and rebuild against it on every decrypt
+of that collection. The recorded refusal covers the write epoch alone. A read
+epoch's entry is unwrapped lazily, so a corrupt one raises `IntegrityError` from
+the decrypt of an envelope sealed under it, after the refresh is spent. That
+error is not told apart from a mis-bound envelope's and is not recorded: on a
+private collection it propagates out of the hydrate, as a mis-bound envelope's
+does, while the shared reader skips the one resource (see "Failing closed"
+above). Any other refresh failure (a dropped connection) is logged and leaves
+the refresh un-spent, so the next unknown-epoch decrypt re-asks. A refresh still
+in flight when another source is installed writes none of this bookkeeping; its
+outcome belongs to the retired source. The refresh's install and the bootstrap's
+install share one freshness gate: a roster the held cipher already matches, or
+an earlier head of the same log than the one the cipher was built from, is not
+swapped in, so two reads of one log settling in either order cannot move a
+collection backward. The owner's controller view and the chain-head pins live
+together on one `SpaceTrust` (`src/storage/spaceTrust.ts`), created by the auth
+store per connected activation and handed to both the login-time read's store
+and the bootstrap's store (`fromGrants` takes it as `trust`), so the owner's log
+is fetched and verified once and a head served to the second store continues
+what the first pinned. The owner's own account log is pinned in the same store,
+so a resolution retried after a failed one continues the chain the first pinned
+rather than adopting whatever the host serves next. The pins are in memory:
+continuity is checked within a session, and a reload trusts the served head
+afresh. The owner resolution is kept only when it succeeds; a failed fetch is
+retried by the next read rather than remembered.
 
 `readRemoteDescriptors` is the login-time counterpart. It acquires one
 descriptor per granted private collection before any replication exists, because
@@ -1047,7 +1068,8 @@ keeps whatever cipher it opened with (the cached descriptor, or fail-closed) and
 receives no declaration write this session; when the read succeeds on a later
 session it repairs the cipher then. The bootstrap's per-collection hook is
 guarded the same way. A cipher rebuild that raises `KeyUnwrapError` (a roster
-rotated off this app since the cached descriptor) is reported beside the failed
+rotated off this app since the cached descriptor) or `IntegrityError` (a roster
+whose entry for this app fails its key-wrap check) is reported beside the failed
 reads, its descriptor is withdrawn from the set handed to the offline cache, and
 every other collection still replicates. The unknown-epoch refresh is the one
 place a failed read costs nothing further: the refresh is spent by the time the

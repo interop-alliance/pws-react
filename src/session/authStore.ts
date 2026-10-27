@@ -91,6 +91,7 @@ import { mergeAdopted } from '../storage/adopt.js'
 import { startWasSync } from '../storage/wasSync.js'
 import { createSpaceTrust, type SpaceTrust } from '../storage/spaceTrust.js'
 import { errorMessage } from '@interop/was-client/sync'
+import { isRosterEntryFailure } from '../storage/governedDescriptors.js'
 import { SyncController } from '../storage/syncController.js'
 import { log } from '../log.js'
 
@@ -846,16 +847,27 @@ export function createAuthStore({
       })
     } catch (err) {
       await deactivateStore()
-      if (session.restore === 'expired') {
-        // The record was kept for `reconnect()` to renew, and that path runs
-        // only from `reconnect`. This activation lands `local` instead, where
-        // nothing can renew it, so left in place it would re-run this failed
-        // bring-up on every reload. The wallet returns the same seed on the
-        // next login, so the data is not lost.
-        await clearAppSession({ store: sessionStore })
+      if (session.restore === 'expired' && isRosterEntryFailure(err)) {
+        // The cached roster no longer wraps a key to this app, or its entry
+        // for this app fails its key-wrap check (a corrupt entry the cipher
+        // build checks eagerly), so this bring-up fails the same way on every
+        // reload. The record was kept for `reconnect()` to renew, and that
+        // path runs only from `reconnect`; this activation lands `local`
+        // instead, where nothing can renew it. The wallet returns the same
+        // seed on the next login, so the data is not lost. Any other failure
+        // (an IndexedDB error, a collection fail-closed on a missing cache
+        // entry) keeps the record: a reload or the reconnect bootstrap can
+        // repair those.
+        try {
+          await clearAppSession({ store: sessionStore })
+        } catch (clearErr) {
+          log.warn('Failed to clear the persisted app session', {
+            err: clearErr
+          })
+        }
       }
-      // The error the caller sees is the activation's own, never the one a
-      // failed fallback hides behind it (`reopenLocal` records that one).
+      // The caller sees the activation's own error; a failed fallback is only
+      // logged (`reopenLocal` records that one).
       await reopenLocal()
       throw err
     }

@@ -28,6 +28,7 @@ import type {
   RxCollection,
   RxDatabase,
   RxDocument,
+  RxError,
   RxStorage
 } from 'rxdb/plugins/core'
 import {
@@ -57,14 +58,11 @@ import {
 } from './docCipher.js'
 import { log } from '../log.js'
 import { remotePayloadWins } from '@interop/social-core'
-import {
-  epochRostersEqual,
-  hasKeyEpochs,
-  isKeyUnwrapError
-} from '@interop/was-client/edv'
+import { epochRostersEqual, hasKeyEpochs } from '@interop/was-client/edv'
 import {
   acquireGovernedDescriptor,
-  isDescriptorRefusal
+  isDescriptorRefusal,
+  isRosterEntryFailure
 } from './governedDescriptors.js'
 import { isIntegrityError, isUnknownEpochError } from '@interop/was-client/sync'
 import type {
@@ -242,6 +240,18 @@ export interface ReplicaChange {
  *
  * @returns {Promise<RxStorage<unknown, unknown>>}
  */
+/**
+ * Whether a row's stored revision has moved on from the one in hand, by an
+ * edit or a tombstone (a pull landing while a decrypt waited).
+ *
+ * @param row {RxDocument<SyncedDoc>}   the row as it was read
+ * @returns {boolean}
+ */
+function rowChanged(row: RxDocument<SyncedDoc>): boolean {
+  const latest = row.getLatest()
+  return latest.deleted || latest.revision !== row.revision
+}
+
 async function defaultStorage(): Promise<RxStorage<unknown, unknown>> {
   const { getRxStorageDexie } = await import('rxdb/plugins/storage-dexie')
   return getRxStorageDexie()
@@ -284,11 +294,13 @@ export class LocalStore {
   readonly #refreshPolicy: DescriptorRefreshPolicy
   readonly #refreshing = new Map<string, Promise<void>>()
   // Per collection, the refusal its refresh met: a source that does not
-  // verify the governing log, a governing log the source refused to adopt, or
-  // a fetched roster that lists the epoch but wraps no key to this app
-  // (`KeyUnwrapError` from the rebuild). Kept so the decrypt that spent the
-  // refresh, and every later one, surfaces that refusal as itself rather than
-  // as the envelope's unknown epoch (see `#decryptWithRefresh`).
+  // verify the governing log, a governing log the source refused to adopt, a
+  // fetched roster that lists the epoch but wraps no key to this app
+  // (`KeyUnwrapError` from the rebuild), or a fetched roster whose entry for
+  // this app fails its key-wrap check (`IntegrityError` from the rebuild).
+  // Kept so the decrypt that spent the refresh, and every later one, surfaces
+  // that refusal as itself rather than as the envelope's unknown epoch (see
+  // `#decryptWithRefresh`).
   readonly #refusals = new Map<string, Error>()
   // Per collection LOGICAL key, the tail of its cipher-rebuild chain (see
   // `#serializeRebuild`).
@@ -366,11 +378,19 @@ export class LocalStore {
           // roster that lists the epoch but wraps no key to this app is the
           // same kind of answer (the source has spoken, and asking again
           // changes nothing), so a `KeyUnwrapError` from the rebuild is
-          // recorded too. The recorded error is what the decrypt surfaces.
-          if (
-            isDescriptorRefusal(err) ||
-            (isKeyUnwrapError(err) && err instanceof Error)
-          ) {
+          // recorded too. So is an `IntegrityError` from it: the roster's
+          // entry for this app fails its key-wrap check, a corrupt or
+          // tampered entry that a re-read of the same log serves again.
+          // Un-arming the guard instead would re-read the descriptor and
+          // rebuild against that entry on every decrypt of the collection.
+          // The recorded error is what the decrypt surfaces. Only the write
+          // epoch's entry is checked here, eagerly, by the rebuild; a read
+          // epoch's entry is unwrapped lazily, on the first decrypt of an
+          // envelope sealed under it, and its `IntegrityError` is raised by
+          // that decrypt. It is not told apart from a mis-bound envelope's
+          // (one error type covers both) and is not recorded: it propagates
+          // per envelope, as a mis-bound envelope's does.
+          if (isDescriptorRefusal(err) || isRosterEntryFailure(err)) {
             if (sourceStands()) {
               this.#refusals.set(collectionId, err)
             }
@@ -1045,10 +1065,53 @@ export class LocalStore {
       return
     }
     const doc = await this.#collection(key).findOne(envelopeId).exec()
-    if (doc) {
-      await doc.remove()
+    // Through the incremental write queue, so a pull that moved the row since
+    // the lookup retries against the row as stored instead of failing with a
+    // storage conflict. A row the pull tombstoned meanwhile is left as it is:
+    // the queue has no tombstone guard of its own and would write a second
+    // tombstone revision, which replication would push as a redundant delete.
+    const latest = doc?.getLatest()
+    if (latest && !latest.deleted) {
+      await latest.incrementalRemove()
     }
     index.delete(uuid)
+  }
+
+  /**
+   * Tombstones a singleton loser (RxDB soft delete, so the deletion
+   * replicates) only while its stored row is still the revision the caller
+   * decided over. A row rewritten by a pull since the caller read it is left
+   * alone and the removal reports `false`: a pulled edit of a loser may
+   * outrank the winner, and removing it blind would lose it, so the caller
+   * leaves it to the next hydrate. A row a pull already tombstoned reports
+   * `true` without a write: the end state this asks for already holds.
+   *
+   * `remove()` on the row as read is that conditional write: RxDB writes the
+   * tombstone with the row's own data as `previous` and raises `CONFLICT`
+   * when the stored row has moved. `incrementalRemove` would retry against
+   * the moved row instead, which is the blind removal this avoids.
+   *
+   * @param options {object}
+   * @param options.row {RxDocument<SyncedDoc>}   the row as the caller read it
+   * @returns {Promise<boolean>}   whether the row is tombstoned
+   */
+  async #tombstoneUnlessChanged({
+    row
+  }: {
+    row: RxDocument<SyncedDoc>
+  }): Promise<boolean> {
+    if (row.getLatest().deleted) {
+      return true
+    }
+    try {
+      await row.remove()
+      return true
+    } catch (err) {
+      if ((err as Partial<RxError>).code === 'CONFLICT') {
+        return false
+      }
+      throw err
+    }
   }
 
   /**
@@ -1168,13 +1231,54 @@ export class LocalStore {
         winner = entry
       }
     }
+    // The rows were read before the decrypts, which can wait on a descriptor
+    // refresh, and a pull can land meanwhile. A winner whose row changed under
+    // the decrypt (an edit, or a tombstone from another client) has not been
+    // weighed against the losers, so nothing is tombstoned on its strength:
+    // the next hydrate reconciles the set as it stands. The winner's payload
+    // is still returned, as the change stream patches the edit over it.
+    if (rowChanged(winner.row)) {
+      log.warn(
+        'The singleton winner changed while duplicates were being ' +
+          'reconciled; leaving them to the next hydrate.',
+        { collectionKey: key, resourceId: winner.envelopeId }
+      )
+      index.set(winner.payload.id, winner.envelopeId)
+      return winner.payload
+    }
     // The losers are tombstoned through the RxDocuments already in hand,
-    // concurrently: no re-lookup, and the removals are independent.
+    // concurrently: no re-lookup, and the removals are independent. A loser
+    // whose row changed under the decrypt is skipped for the same reason.
     await Promise.all(
       decoded
         .filter(entry => entry.envelopeId !== winner.envelopeId)
-        .map(async entry => await entry.row.remove())
+        .map(async entry => {
+          const removed = await this.#tombstoneUnlessChanged({
+            row: entry.row
+          })
+          if (!removed) {
+            log.warn(
+              'A duplicate singleton row changed while it was being ' +
+                'reconciled; leaving it to the next hydrate.',
+              { collectionKey: key, resourceId: entry.envelopeId }
+            )
+          }
+        })
     )
+    // The check above covers the decrypt window only; the removals open
+    // another, and a loser's conditional write guards the loser, not the
+    // winner. A winner a pull edited or tombstoned meanwhile has had its
+    // losers removed on its earlier strength, which nothing here can take
+    // back: the removals have replicated. Warned about so the convergence is
+    // traceable; the change stream carries the edit or the deletion over the
+    // returned payload.
+    if (rowChanged(winner.row)) {
+      log.warn(
+        'The singleton winner changed while its duplicates were being ' +
+          'tombstoned; the removals stand.',
+        { collectionKey: key, resourceId: winner.envelopeId }
+      )
+    }
     index.set(winner.payload.id, winner.envelopeId)
     return winner.payload
   }

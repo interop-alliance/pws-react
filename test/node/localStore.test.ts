@@ -16,6 +16,8 @@
  */
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it } from 'vitest'
+import { captureLogger } from '@interop/logger'
+import { setLogger } from '../../src/log.js'
 import {
   mintHmacKey,
   ownerRecipient,
@@ -23,6 +25,7 @@ import {
 } from '@interop/was-client/edv'
 import type { CollectionEncryption } from '@interop/was-client'
 import { isIntegrityError } from '@interop/was-client/sync'
+import type { Json } from '@interop/was-sync'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import { LocalStore } from '../../src/storage/localStore.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
@@ -139,7 +142,7 @@ function makeNote(title: string): NoteDoc {
     category: 'someday',
     createdAt: now,
     updatedAt: now,
-    writerId: 'device-a'
+    writerId: 'writer-a'
   }
 }
 
@@ -220,6 +223,27 @@ describe('LocalStore entity CRUD', () => {
     expect(await store.listEntities<NoteDoc>(COLLECTION)).toHaveLength(0)
     const rows = await store.rxCollection(COLLECTION).find().exec()
     expect(rows).toHaveLength(0)
+  })
+
+  it('leaves a row a pull already tombstoned alone on delete', async () => {
+    // The row is tombstoned under `deleteEntity` (a remote delete pulled
+    // between the lookup and the removal); a second tombstone revision would
+    // replicate as a redundant delete.
+    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const note = makeNote('Ephemeral')
+    await store.insertEntity(COLLECTION, note)
+    const envelopeId = store.envelopeIdFor(COLLECTION, note.id)!
+    const row = (await store
+      .rxCollection(COLLECTION)
+      .findOne(envelopeId)
+      .exec())!
+    await row.incrementalRemove()
+    const revision = row.getLatest().revision
+
+    await store.deleteEntity(COLLECTION, note.id)
+
+    expect(row.getLatest().revision).toBe(revision)
+    expect(store.envelopeIdFor(COLLECTION, note.id)).toBeUndefined()
   })
 
   it('upserts: inserts once then updates in place under a stable envelope', async () => {
@@ -456,23 +480,95 @@ async function openGatedStore(
   return store
 }
 
+/**
+ * A one-epoch roster over this identity and a bystander, and the two-epoch
+ * roster that rotating the bystander off grows it into.
+ */
+async function rotatedRosters(): Promise<{
+  earlier: CollectionEncryption
+  later: CollectionEncryption
+}> {
+  const { keyAgreementKey } = await identityKeys()
+  const bystander = await deriveIdentity({ seed: FOREIGN_SEED })
+  const bystanderRecipient = ownerRecipient({
+    keyAgreementKey: bystander.keyAgreementKey
+  })
+  const earlier = await mintRoster({
+    recipients: [ownerRecipient({ keyAgreementKey }), bystanderRecipient]
+  })
+  const later = await rotateRoster({
+    descriptor: earlier,
+    removeKid: bystanderRecipient.id
+  })
+  return { earlier, later }
+}
+
+/**
+ * Two payloads of one singleton: an older loser and a newer winner.
+ */
+function duplicateSingletons(): { older: NoteDoc; newer: NoteDoc } {
+  return {
+    older: makeSingleton({
+      title: 'older',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      writerId: 'writer-a'
+    }),
+    newer: makeSingleton({
+      title: 'newer',
+      updatedAt: '2026-02-02T00:00:00.000Z',
+      writerId: 'writer-b'
+    })
+  }
+}
+
+/**
+ * Seals two duplicates of one singleton under a rotated (two-epoch) roster,
+ * then reopens the database on the one-epoch roster it grew from, so the
+ * first decrypt of a hydrate waits on a descriptor refresh. `betweenInserts`
+ * runs against the sealing store after the loser is in and before the winner
+ * is, for a test that needs to stage a row edit.
+ */
+async function sealDuplicatesThenReopen({
+  betweenInserts
+}: {
+  betweenInserts?: (staged: {
+    sealing: LocalStore
+    older: NoteDoc
+    loserId: string
+  }) => Promise<void>
+} = {}): Promise<{
+  store: LocalStore
+  later: CollectionEncryption
+  older: NoteDoc
+  newer: NoteDoc
+  loserId: string
+  winnerId: string
+}> {
+  const { earlier, later } = await rotatedRosters()
+  const dbName = `was-react-test-${++dbCounter}`
+  const sealing = await openStore(dbName, COLLECTIONS, {
+    [COLLECTION]: later
+  })
+  const { older, newer } = duplicateSingletons()
+  await sealing.insertEntity(COLLECTION, older)
+  const loserId = sealing.envelopeIdFor(COLLECTION, older.id)!
+  await betweenInserts?.({ sealing, older, loserId })
+  await sealing.insertEntity(COLLECTION, newer)
+  const winnerId = sealing.envelopeIdFor(COLLECTION, newer.id)!
+  expect(winnerId).not.toBe(loserId)
+  await openStores.pop()!.close()
+  const store = await openStore(dbName, COLLECTIONS, {
+    [COLLECTION]: earlier
+  })
+  return { store, later, older, newer, loserId, winnerId }
+}
+
 describe('LocalStore.applyRemoteDescriptor', () => {
   it('does not swap an earlier head of the log back in over a later one', async () => {
     // Two reads of one governing log can settle in either order. Once the
     // cipher is on the rotated (two-epoch) roster, the one-epoch roster it
     // grew from is an earlier head and must be ignored, not installed.
-    const { keyAgreementKey } = await identityKeys()
-    const bystander = await deriveIdentity({ seed: FOREIGN_SEED })
-    const bystanderRecipient = ownerRecipient({
-      keyAgreementKey: bystander.keyAgreementKey
-    })
-    const earlier = await mintRoster({
-      recipients: [ownerRecipient({ keyAgreementKey }), bystanderRecipient]
-    })
-    const later = await rotateRoster({
-      descriptor: earlier,
-      removeKid: bystanderRecipient.id
-    })
+    const { earlier, later } = await rotatedRosters()
     const store = await openStore(
       `was-react-test-${++dbCounter}`,
       COLLECTIONS,
@@ -703,17 +799,17 @@ describe('LocalStore singleton hydration', () => {
 
   it('reconciles duplicate singletons to the LWW winner and tombstones the rest', async () => {
     const store = await openStore(`was-react-test-${++dbCounter}`)
-    // Two devices each created the singleton before syncing: distinct envelope
+    // Two clients each created the singleton before syncing: distinct envelope
     // rows that both decrypt to `_singleton`.
     const older = makeSingleton({
       title: 'older',
       updatedAt: '2026-01-01T00:00:00.000Z',
-      writerId: 'device-a'
+      writerId: 'writer-a'
     })
     const newer = makeSingleton({
       title: 'newer',
       updatedAt: '2026-02-02T00:00:00.000Z',
-      writerId: 'device-b'
+      writerId: 'writer-b'
     })
     await store.insertEntity(COLLECTION, older)
     await store.insertEntity(COLLECTION, newer)
@@ -740,12 +836,12 @@ describe('LocalStore singleton hydration', () => {
     const older = makeSingleton({
       title: 'old',
       updatedAt: '2026-01-01T00:00:00.000Z',
-      writerId: 'device-a'
+      writerId: 'writer-a'
     })
     const newer = makeSingleton({
       title: 'new',
       updatedAt: '2026-02-02T00:00:00.000Z',
-      writerId: 'device-b'
+      writerId: 'writer-b'
     })
     await store.insertEntity(COLLECTION, older)
     await store.insertEntity(COLLECTION, newer)
@@ -763,16 +859,130 @@ describe('LocalStore singleton hydration', () => {
     const at = '2026-03-03T00:00:00.000Z'
     await store.insertEntity(
       COLLECTION,
-      makeSingleton({ title: 'a', updatedAt: at, writerId: 'device-a' })
+      makeSingleton({ title: 'a', updatedAt: at, writerId: 'writer-a' })
     )
     await store.insertEntity(
       COLLECTION,
-      makeSingleton({ title: 'z', updatedAt: at, writerId: 'device-z' })
+      makeSingleton({ title: 'z', updatedAt: at, writerId: 'writer-z' })
     )
 
     const winner = await store.hydrateSingleton<NoteDoc>(COLLECTION)
-    expect(winner!.writerId).toBe('device-z')
+    expect(winner!.writerId).toBe('writer-z')
     expect(await store.rxCollection(COLLECTION).find().exec()).toHaveLength(1)
+  })
+
+  it('leaves a loser that a pull changed mid-hydrate to the next hydrate', async () => {
+    // The decrypt window of a hydrate can include a descriptor refresh, and
+    // a pull can land on a duplicate row meanwhile. Here the rows are sealed
+    // under a rotated (two-epoch) roster, the store reopens on the one-epoch
+    // roster it grew from, and the governed source the refresh asks writes a
+    // newer envelope onto the loser row before answering. Removing the loser
+    // through the stale RxDocument would conflict and reject the hydrate.
+    let edited: NoteDoc | undefined
+    let pulled: Json | undefined
+    const { store, later, newer, loserId } = await sealDuplicatesThenReopen({
+      betweenInserts: async ({ sealing, older, loserId }) => {
+        const loserRow = async () =>
+          (await sealing.rxCollection(COLLECTION).findOne(loserId).exec())!
+        const stale = (await loserRow()).toMutableJSON().data
+        // The edit a pull will land: the loser re-sealed with a stamp that
+        // outranks the winner, captured and then set back to the stale
+        // envelope.
+        edited = {
+          ...older,
+          title: 'edited elsewhere',
+          updatedAt: '2026-03-03T00:00:00.000Z'
+        }
+        await sealing.updateEntity(COLLECTION, edited)
+        pulled = (await loserRow()).toMutableJSON().data
+        await (await loserRow()).incrementalPatch({ data: stale })
+      }
+    })
+    let refreshes = 0
+    store.setDescriptorSource({
+      verifiesHistory: true,
+      collectionEncryption: async () => {
+        refreshes += 1
+        const loserRow = await store
+          .rxCollection(COLLECTION)
+          .findOne(loserId)
+          .exec()
+        await loserRow!.incrementalPatch({ data: pulled })
+        return later
+      }
+    })
+
+    await expect(store.hydrateSingleton<NoteDoc>(COLLECTION)).resolves.toEqual(
+      newer
+    )
+    expect(refreshes).toBe(1)
+    // The changed loser stands beside the winner rather than being tombstoned
+    // on the strength of its stale envelope.
+    expect(await store.rxCollection(COLLECTION).find().exec()).toHaveLength(2)
+
+    // The next hydrate weighs the pulled edit, which now wins.
+    expect(await store.hydrateSingleton<NoteDoc>(COLLECTION)).toEqual(edited)
+    expect(await store.rxCollection(COLLECTION).find().exec()).toHaveLength(1)
+  })
+
+  it('skips a loser another client tombstoned under the decrypt, without a warning', async () => {
+    // The pull lands a tombstone on the loser while the hydrate decrypts: the
+    // end state the reconcile asks for already holds, so no conditional
+    // write is spent on it and nothing is left to the next hydrate.
+    const { store, later, newer, loserId } = await sealDuplicatesThenReopen()
+    store.setDescriptorSource({
+      verifiesHistory: true,
+      collectionEncryption: async () => {
+        const loserRow = await store
+          .rxCollection(COLLECTION)
+          .findOne(loserId)
+          .exec()
+        await loserRow!.incrementalRemove()
+        return later
+      }
+    })
+
+    const capture = captureLogger('wr')
+    const previous = setLogger(capture.logger)
+    try {
+      expect(await store.hydrateSingleton<NoteDoc>(COLLECTION)).toEqual(newer)
+    } finally {
+      setLogger(previous)
+    }
+    expect(capture.events.filter(event => event.level === 'warn')).toEqual([])
+    const live = await store.rxCollection(COLLECTION).find().exec()
+    expect(live.map(row => row.id)).toEqual([
+      store.envelopeIdFor(COLLECTION, newer.id)
+    ])
+  })
+
+  it('tombstones no loser when the winner changed under the decrypt', async () => {
+    // Same window as above, with the pull landing on the winner instead: the
+    // row is tombstoned (deleted on another client) while the hydrate
+    // decrypts, so the loser has not been weighed against anything that
+    // still stands and is left alone.
+    const { store, later, older, newer, loserId, winnerId } =
+      await sealDuplicatesThenReopen()
+    store.setDescriptorSource({
+      verifiesHistory: true,
+      collectionEncryption: async () => {
+        const winnerRow = await store
+          .rxCollection(COLLECTION)
+          .findOne(winnerId)
+          .exec()
+        await winnerRow!.incrementalRemove()
+        return later
+      }
+    })
+
+    // The payload decrypted before the tombstone is still what this hydrate
+    // answers; the change stream carries the deletion over it.
+    expect(await store.hydrateSingleton<NoteDoc>(COLLECTION)).toEqual(newer)
+    const live = await store.rxCollection(COLLECTION).find().exec()
+    expect(live.map(row => row.id)).toEqual([loserId])
+    // The next hydrate settles on what still stands.
+    expect(await store.hydrateSingleton<NoteDoc>(COLLECTION)).toEqual(older)
+    expect(store.envelopeIdFor(COLLECTION, older.id)).toBe(loserId)
   })
 })
 

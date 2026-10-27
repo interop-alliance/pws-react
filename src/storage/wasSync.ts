@@ -155,7 +155,9 @@ async function readGrantedEncryption({
       if (onCollection) {
         // The hook is guarded per collection too. A cipher rebuild raises
         // `KeyUnwrapError` when the served roster lists epochs and leaves this
-        // app out (rotated off since the cached descriptor), and a throw
+        // app out (rotated off since the cached descriptor), or
+        // `IntegrityError` when the roster's entry for this app fails its
+        // key-wrap check (a corrupt or tampered entry), and a throw
         // escaping `Promise.all` here would reject the whole bootstrap:
         // nothing after the pass would run and no collection would replicate.
         // The failure costs that one collection, and its descriptor is
@@ -443,8 +445,9 @@ export async function startWasSync({
   // A read or a hook that failed degrades that one collection: it keeps the
   // cipher it opened with (the cached descriptor, or fail-closed) and receives
   // no declaration write this session. A failed read is not "no object", and
-  // a failed cipher rebuild (a roster rotated off this app) is a
-  // `KeyUnwrapError` the per-row decrypts repeat, not a bootstrap failure.
+  // a failed cipher rebuild is a `KeyUnwrapError` (a roster rotated off this
+  // app) or an `IntegrityError` (this app's roster entry fails its key-wrap
+  // check) the per-row decrypts repeat, not a bootstrap failure.
   for (const { collection, err } of failures) {
     log.warn(
       'Skipping the sync bootstrap of a collection: its metadata object ' +

@@ -94,3 +94,43 @@ export async function rotateRoster({
     resolveRecipientKey: trustRosterDidKeys
   })
 }
+
+/**
+ * Copies a roster with one recipient entry's wrapped epoch key damaged: the
+ * `encrypted_key` keeps its length and stays valid base64url, so it decodes
+ * and then fails the AES-KW integrity check. That is what a corrupt or
+ * tampered entry addressed to a reader looks like, and was-client raises
+ * `IntegrityError` for it rather than `KeyUnwrapError` (which a malformed
+ * entry, or no entry at all, keeps raising).
+ *
+ * @param options {object}
+ * @param options.descriptor {CollectionEncryption}
+ * @param options.kid {string}   the recipient's key id (`header.kid`)
+ * @param [options.epochId] {string}   the epoch to damage the entry in; the
+ *   descriptor's current epoch by default
+ * @returns {CollectionEncryption}
+ */
+export function corruptRecipientEntry({
+  descriptor,
+  kid,
+  epochId = descriptor.currentEpoch
+}: {
+  descriptor: CollectionEncryption
+  kid: string
+  epochId?: string
+}): CollectionEncryption {
+  const copy = structuredClone(descriptor)
+  const epoch = copy.epochs?.find(candidate => candidate.id === epochId)
+  const entry = epoch?.recipients.find(
+    recipient => recipient.header.kid === kid
+  )
+  if (!entry) {
+    throw new Error(`No entry for kid "${kid}" in epoch "${epochId}".`)
+  }
+  const wrapped = entry.encrypted_key
+  const index = Math.floor(wrapped.length / 2)
+  const flipped = wrapped[index] === 'A' ? 'B' : 'A'
+  entry.encrypted_key =
+    wrapped.slice(0, index) + flipped + wrapped.slice(index + 1)
+  return copy
+}

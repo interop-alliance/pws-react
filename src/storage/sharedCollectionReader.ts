@@ -313,12 +313,16 @@ export class SharedCollectionReader {
    * cannot read, and the reader's contract is to warn and skip them, never to
    * fail the listing: the listing degrades to the subset that still decrypts.
    *
-   * An `IntegrityError` is a fourth kind and not a tolerated non-result: the
-   * envelope was sealed for a different resource than the one it was read
-   * under, which is the server serving one document's content under another's
-   * URL. It propagates, since `get()`'s caller asked for exactly that resource
-   * and a silent `undefined` would read as "not there". The listing paths
-   * absorb it themselves ({@link SharedCollectionReader.#decryptForListing}).
+   * An `IntegrityError` is a fourth kind and not a tolerated non-result. It
+   * has two sources. The envelope was sealed for a different resource than
+   * the one it was read under, which is the server serving one document's
+   * content under another's URL. Or the envelope's epoch is one the cipher
+   * unwraps lazily, and the roster's entry for this app in it fails its
+   * key-wrap check on that first decrypt, which is a corrupt or tampered
+   * entry. Either propagates, since `get()`'s caller asked for exactly that
+   * resource and a silent `undefined` would read as "not there". The listing
+   * paths absorb it themselves
+   * ({@link SharedCollectionReader.#decryptForListing}).
    *
    * @param options {object}
    * @param options.id {string}   the WAS resource id the body was read under
@@ -361,10 +365,12 @@ export class SharedCollectionReader {
 
   /**
    * {@link SharedCollectionReader.#decryptBody} for the two listing paths,
-   * which additionally skip a mis-bound envelope: one of them must not make a
-   * wallet-owned collection this app can neither repair nor route around
-   * unlistable. The skip is logged at `error` rather than `warn`, because
-   * unlike the non-results `#decryptBody` absorbs it is never expected.
+   * which additionally skip an `IntegrityError` (a mis-bound envelope, or an
+   * epoch whose roster entry for this app fails its key-wrap check): one of
+   * them must not make a wallet-owned collection this app can neither repair
+   * nor route around unlistable. The skip is logged at `error` rather than
+   * `warn`, because unlike the non-results `#decryptBody` absorbs it is never
+   * expected.
    *
    * @param options {object}
    * @param options.id {string}   the WAS resource id the body was read under
@@ -386,7 +392,9 @@ export class SharedCollectionReader {
       }
       log.error(
         'Skipping a resource of a shared collection: its envelope was ' +
-          'sealed for a different resource than the id it is stored under.',
+          'sealed for a different resource than the id it is stored under, ' +
+          "or this app's roster entry for its key epoch fails its key-wrap " +
+          'check.',
         { resourceId: id, collectionId: this.collectionId, err }
       )
       return undefined
@@ -415,7 +423,10 @@ export class SharedCollectionReader {
 /**
  * Builds the self-refreshing epoch-aware cipher for a shared collection,
  * turning the two "cannot read this collection" outcomes into one descriptive
- * error: no multi-recipient roster at all, and a roster this app is not in.
+ * error: no multi-recipient roster at all, and a roster this app is not in. A
+ * roster that names this app in its current epoch with an entry that fails
+ * its key-wrap check is neither: the build raises `IntegrityError` for it,
+ * and that is rethrown as itself, like a descriptor refusal.
  *
  * The build is the reader's ONE descriptor read at open (`acquireDescriptor`
  * fetches through `source` and caches the result), so the roster check below
@@ -480,7 +491,10 @@ async function buildSharedCipher({
     sink.rethrow()
     // A refusal is a wiring fault or a security signal, not a share this app
     // lacks, so it is surfaced as itself rather than as "not a recipient".
-    if (isDescriptorRefusal(err)) {
+    // So is an `IntegrityError`: the roster names this app, and its entry
+    // fails its key-wrap check, which is a corrupt or tampered entry rather
+    // than a share this app was never given.
+    if (isDescriptorRefusal(err) || isIntegrityError(err)) {
       throw err
     }
     throw new SharedCollectionUnavailableError(
