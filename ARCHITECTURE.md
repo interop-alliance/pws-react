@@ -79,7 +79,23 @@ Four states (`SessionStatus`):
   (or any error during restore) lands here rather than on a dead login screen.
 - `connected` -- a wallet-derived identity, parsed grants, running replication.
 - `reconnect` -- connected but access expired or revoked; the replica stays
-  usable and remote invocations are paused until a re-grant.
+  usable and remote invocations are paused until a re-grant. It is reached from
+  a live `connected` session (a 401 or 403, the near-expiry watch) and from
+  `boot`, when the persisted session's grants have already expired or no longer
+  cover every configured collection.
+
+A hot restore never wipes the persisted session over its expiry. The seed is
+what the connected replica is encrypted under, and only the grants need
+renewing, so a reload after the grants ran out overnight opens that replica on
+the cached descriptors alone (expired grants invoke nothing, so no live
+descriptor read is attempted), starts no replication, and lands `reconnect`
+behind the banner. `reconnect()` then renews the grants, persists the record,
+and starts sync, as it does from a live session. Only a logout or a clear-data
+removes the seed, with one exception: an expired restore whose activation fails
+(a cached roster that no longer wraps a key to this app) clears the record. The
+activation has landed `local`, where nothing can renew the grants, so a kept
+record would only re-run the failed bring-up on every reload. The wallet returns
+the same seed on the next login.
 
 ### The anonymous local-first replica
 

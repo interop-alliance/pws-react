@@ -2,9 +2,9 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * App-session persistence tests (fake-indexeddb): persist/restore round trip,
- * expiry fallthrough (expired records are cleared), the earliest-expiry
- * reduction, and logout wiping.
+ * App-session persistence tests (fake-indexeddb): persist/peek round trip,
+ * an expired record surviving the read (the hot restore lands `reconnect` on
+ * it), the earliest-expiry reduction, and logout wiping.
  */
 import { describe, expect, it } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
@@ -13,9 +13,9 @@ import {
   clearAppSession,
   earliestExpiry,
   isExpired,
+  peekAppSession,
   persistAppSession,
-  restoreAppSession,
-  type RestoredAppSession
+  type AppSession
 } from '../../src/identity/appSession.js'
 import { createSeedStore } from '../../src/identity/seedStore.js'
 
@@ -29,7 +29,7 @@ function futureIso(ms: number): string {
   return new Date(Date.now() + ms).toISOString()
 }
 
-function sessionFixture(expires: string): RestoredAppSession {
+function sessionFixture(expires: string): AppSession {
   return {
     seed: crypto.getRandomValues(new Uint8Array(32)),
     controllerDid: 'did:key:z6MkTest',
@@ -71,44 +71,53 @@ describe('earliestExpiry', () => {
   })
 })
 
-describe('persist/restore', () => {
+describe('persist/peek', () => {
   it('round-trips a live session', async () => {
     const store = newStore()
     const session = sessionFixture(futureIso(60_000))
     await persistAppSession({ session, store })
-    const restored = await restoreAppSession({ store })
-    expect(restored).not.toBeNull()
-    expect(restored!.seed).toEqual(session.seed)
-    expect(restored!.controllerDid).toBe(session.controllerDid)
-    expect(restored!.baseUrl).toBe(session.baseUrl)
-    expect(restored!.spaceId).toBe(session.spaceId)
-    expect(restored!.grants).toEqual(session.grants)
-    expect(restored!.expires).toBe(session.expires)
+    const { seed, record } = await peekAppSession({ store })
+    expect(seed).toEqual(session.seed)
+    expect(record).not.toBeNull()
+    expect(record!.controllerDid).toBe(session.controllerDid)
+    expect(record!.baseUrl).toBe(session.baseUrl)
+    expect(record!.spaceId).toBe(session.spaceId)
+    expect(record!.grants).toEqual(session.grants)
+    expect(record!.expires).toBe(session.expires)
   })
 
-  it('returns null with nothing persisted', async () => {
+  it('answers null halves with nothing persisted', async () => {
     const store = newStore()
-    expect(await restoreAppSession({ store })).toBeNull()
+    expect(await peekAppSession({ store })).toEqual({
+      seed: null,
+      record: null
+    })
   })
 
-  it('clears and returns null for an expired record', async () => {
+  it('keeps an expired record and its seed, leaving the expiry to the caller', async () => {
     const store = newStore()
     const session = sessionFixture(new Date(Date.now() - 1000).toISOString())
     await persistAppSession({ session, store })
-    expect(await restoreAppSession({ store })).toBeNull()
-    // The record (including the seed) was wiped, not just skipped.
-    const again = await restoreAppSession({ store })
-    expect(again).toBeNull()
+    const { seed, record } = await peekAppSession({ store })
+    expect(seed).toEqual(session.seed)
+    expect(record!.expires).toBe(session.expires)
+    expect(isExpired(record!.expires)).toBe(true)
+    // Nothing was wiped by the read.
+    const again = await peekAppSession({ store })
+    expect(again.seed).toEqual(session.seed)
+    expect(again.record).toEqual(record)
   })
 
-  it('returns null for a structurally invalid record', async () => {
+  it('answers a null record for a structurally invalid one', async () => {
     const store = newStore()
     const session = sessionFixture(futureIso(60_000))
     await persistAppSession({
       session: { ...session, grants: [] },
       store
     })
-    expect(await restoreAppSession({ store })).toBeNull()
+    const { seed, record } = await peekAppSession({ store })
+    expect(seed).toEqual(session.seed)
+    expect(record).toBeNull()
   })
 
   it('clearAppSession wipes the persisted session', async () => {
@@ -118,6 +127,9 @@ describe('persist/restore', () => {
       store
     })
     await clearAppSession({ store })
-    expect(await restoreAppSession({ store })).toBeNull()
+    expect(await peekAppSession({ store })).toEqual({
+      seed: null,
+      record: null
+    })
   })
 })

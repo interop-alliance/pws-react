@@ -2,8 +2,24 @@
 
 ## 0.31.0 - TBD
 
+### Changed
+
+- `restoreAppSession` is removed from the root entry and `peekAppSession` is
+  exported in its place: the one reader of the persisted session, which never
+  wipes anything and leaves the expiry to the caller (`isExpired`).
+- `RestoredAppSession` is renamed `AppSession` (the `persistAppSession` input:
+  the record plus the seed).
+
 ### Fixed
 
+- A boot over a persisted session whose grants have expired lands `reconnect`
+  over the connected replica, with the seed intact and no replication started,
+  instead of wiping the session and landing an anonymous `local` replica with no
+  reconnect banner. The replica opens on the cached descriptors alone, and
+  `reconnect()` renews the grants, persists the record, and starts sync. When
+  that expired restore fails to open the replica (a cached roster that no longer
+  wraps a key to this app), the record is cleared, so the session lands a clean
+  `local` rather than re-running the failed bring-up on every reload.
 - `login` resolves `null` instead of connecting when the session changed while
   the wallet popup was open (a provider unmount with no re-mount, a
   `clearLocalData`, a `connectWithGrants`). A sync-controller stop that throws

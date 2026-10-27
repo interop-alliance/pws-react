@@ -67,13 +67,13 @@ export {
 } from './identity/seedCredential.js'
 export {
   persistAppSession,
-  restoreAppSession,
+  peekAppSession,
   clearAppSession,
   isExpired,
   isNearExpiry,
   earliestExpiry,
   type AppSessionRecord,
-  type RestoredAppSession
+  type AppSession
 } from './identity/appSession.js'
 
 // Auth: CHAPI bridge, VPR construction, response verification, login flow.

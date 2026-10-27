@@ -10,11 +10,15 @@
  *
  * `boot` attempts a zero-popup session restore. A restore hit opens the
  * encrypted {@link LocalStore} under the session seed, hydrates the entity
- * stores, starts WAS replication, and lands `connected`. A restore miss (or any
- * error) opens the store under a persisted ANONYMOUS seed instead and lands
- * `local`: a fully usable, encrypted, local-only replica with no remote. Both
- * successors finish open+hydrate before leaving `boot`, so "app ready" is simply
- * `status !== 'boot'`.
+ * stores, starts WAS replication, and lands `connected`. A hit whose grants
+ * have expired opens and hydrates the same replica but starts no replication
+ * and lands `reconnect`, with the seed intact: only the grants need renewing,
+ * and a user whose grants ran out overnight reloads into their own data behind
+ * the reconnect banner rather than into an anonymous replica. A restore miss
+ * (or any error) opens the store under a persisted ANONYMOUS seed instead and
+ * lands `local`: a fully usable, encrypted, local-only replica with no remote.
+ * All successors finish open+hydrate before leaving `boot`, so "app ready" is
+ * simply `status !== 'boot'`.
  *
  * Login (or `connectWithGrants`) tears the anonymous replica down and opens the
  * connected replica under the wallet-derived seed. By default it ADOPTS the
@@ -56,7 +60,7 @@ import {
   clearAppSession,
   peekAppSession,
   persistAppSession,
-  restoreAppSession,
+  isExpired,
   isNearExpiry,
   earliestExpiry,
   NO_EXPIRY_MS
@@ -98,9 +102,19 @@ import { log } from '../log.js'
  *   product state; tier-1 apps may stay here indefinitely).
  * - `connected`: a wallet-derived identity, parsed grants, replication.
  * - `reconnect`: connected but access expired/revoked; the replica stays usable,
- *   remote invocations paused until re-login.
+ *   remote invocations paused until re-login. Reached from a live `connected`
+ *   session (a 401/403, the near-expiry watch) and from `boot`, when the
+ *   persisted session's grants have already expired.
  */
 export type SessionStatus = 'boot' | 'local' | 'connected' | 'reconnect'
+
+/**
+ * How a connected activation treats its persisted grants. `'live'` is the
+ * ordinary hot restore. `'expired'` is a restore of a session whose grants have
+ * run out: the replica opens on the cached descriptors alone, nothing is
+ * persisted, and no replication starts until `reconnect()` renews the grants.
+ */
+type RestoreMode = 'live' | 'expired'
 
 /**
  * The network half of a connected activation (see `prepareActivation`): the
@@ -170,9 +184,10 @@ export interface AuthState {
    */
   sharedCollections: Record<string, SharedCollectionReader>
   /**
-   * Attempt a zero-popup hot restore; a restore hit lands `connected`, any
-   * miss/error falls to `local` (a fresh anonymous replica), never a dead login
-   * screen. No-op once the status has left `boot`.
+   * Attempt a zero-popup hot restore; a restore hit lands `connected` (or
+   * `reconnect`, when the persisted grants have expired or do not cover every
+   * configured collection), any miss/error falls to `local` (a fresh anonymous
+   * replica), never a dead login screen. No-op once the status has left `boot`.
    */
   boot: () => Promise<void>
   /**
@@ -748,27 +763,36 @@ export function createAuthStore({
    * @param session {object}   the connecting identity and its parsed grants
    * @param [session.parsed] {ParsedGrants}   absent for a grant-less session,
    *   which has no Space to trust and no descriptors to read
-   * @param [session.restore] {boolean}   a hot restore rather than a login: a
-   *   descriptor read that fails degrades that collection instead of rejecting
+   * @param [session.restore] {RestoreMode}   a hot restore rather than a
+   *   login: a `'live'` one degrades a collection whose descriptor read fails
+   *   instead of rejecting; an `'expired'` one reads nothing live
    * @returns {Promise<PreparedActivation>}
    */
   async function prepareActivation(session: {
     identity: IdentityAgents
     parsed?: ParsedGrants
-    restore?: boolean
+    restore?: RestoreMode
   }): Promise<PreparedActivation> {
     const { parsed } = session
     if (parsed === undefined) {
       return { fresh: {} }
     }
+    const cached = await descriptorManager.loadCachedDescriptors({
+      controllerDid: session.identity.controllerDid
+    })
+    if (session.restore === 'expired') {
+      // Expired grants invoke nothing, so a live descriptor read could only be
+      // refused. The replica opens on what the cache holds (a collection the
+      // cache does not cover opens fail-closed), and the reconnect's sync
+      // bootstrap reads the live set under the renewed grants and repairs it.
+      return { ...(cached && { descriptors: cached }), fresh: {} }
+    }
     const trust = createSpaceTrust(parsed)
     const { descriptors, fresh } = await descriptorManager.completeDescriptors({
-      cached: await descriptorManager.loadCachedDescriptors({
-        controllerDid: session.identity.controllerDid
-      }),
+      cached,
       identity: session.identity,
       parsed,
-      onReadFailure: session.restore ? 'skip' : 'reject',
+      onReadFailure: session.restore === 'live' ? 'skip' : 'reject',
       trust
     })
     return { trust, descriptors, fresh }
@@ -782,8 +806,9 @@ export function createAuthStore({
    *
    * @param session {object}   the session to open: its seed, identity, parsed
    *   grants and expiry, plus the payloads to adopt (merge logins only)
-   * @param [session.restore] {boolean}   a hot restore rather than a login: a
-   *   descriptor read that fails degrades that collection instead of rejecting
+   * @param [session.restore] {RestoreMode}   a hot restore rather than a
+   *   login; an `'expired'` one opens and hydrates only, and its persisted
+   *   record is cleared when even that fails (see the catch below)
    * @param [session.prepared] {PreparedActivation}   the network half, when
    *   the caller already ran it (the connect transition runs it ahead of the
    *   replica swap); a restore runs it here
@@ -796,7 +821,7 @@ export function createAuthStore({
     grants: IZcap[]
     expires: string
     adopt?: AdoptSource
-    restore?: boolean
+    restore?: RestoreMode
     prepared?: PreparedActivation
   }): Promise<void> {
     try {
@@ -807,6 +832,9 @@ export function createAuthStore({
         ...(session.adopt && { adopt: session.adopt }),
         ...(descriptors && { descriptors })
       })
+      if (session.restore === 'expired') {
+        return
+      }
       await persistAndStartSync({
         seed: session.seed,
         identity: session.identity,
@@ -818,6 +846,14 @@ export function createAuthStore({
       })
     } catch (err) {
       await deactivateStore()
+      if (session.restore === 'expired') {
+        // The record was kept for `reconnect()` to renew, and that path runs
+        // only from `reconnect`. This activation lands `local` instead, where
+        // nothing can renew it, so left in place it would re-run this failed
+        // bring-up on every reload. The wallet returns the same seed on the
+        // next login, so the data is not lost.
+        await clearAppSession({ store: sessionStore })
+      }
       // The error the caller sees is the activation's own, never the one a
       // failed fallback hides behind it (`reopenLocal` records that one).
       await reopenLocal()
@@ -1189,19 +1225,19 @@ export function createAuthStore({
         return
       }
       try {
-        const restored = await restoreAppSession({ store: sessionStore })
-        if (!restored) {
+        const { seed, record } = await peekAppSession({ store: sessionStore })
+        if (!seed || !record) {
           await openLocal()
           return
         }
-        const identity = await deriveIdentity({ seed: restored.seed })
-        if (identity.controllerDid !== restored.controllerDid) {
+        const identity = await deriveIdentity({ seed })
+        if (identity.controllerDid !== record.controllerDid) {
           // A corrupt record; treat as logged out and fall to local.
           await clearAppSession({ store: sessionStore })
           await openLocal()
           return
         }
-        const parsed = parseGrants(restored.grants)
+        const parsed = parseGrants(record.grants)
         // Unlike login/reconnect (which run `checkGrants`), a hot restore trusts
         // the persisted grants; re-check that they still cover every configured
         // collection so a partially-covered grant set raises the reconnect
@@ -1209,18 +1245,22 @@ export function createAuthStore({
         const uncovered = config.collections.filter(
           collection => parsed.byCollectionId[collection.id] === undefined
         )
+        // Expired grants are a `reconnect` restore, not a miss: the seed still
+        // opens the replica, so the user's data is there behind the banner and
+        // only replication waits for the re-grant.
+        const expired = isExpired(record.expires)
         await activateConnected({
-          seed: restored.seed,
+          seed,
           identity,
           parsed,
-          grants: restored.grants,
-          expires: restored.expires,
-          restore: true
+          grants: record.grants,
+          expires: record.expires,
+          restore: expired ? 'expired' : 'live'
         })
         set({
-          status: uncovered.length > 0 ? 'reconnect' : 'connected',
+          status: expired || uncovered.length > 0 ? 'reconnect' : 'connected',
           controllerDid: identity.controllerDid,
-          expires: restored.expires,
+          expires: record.expires,
           error: null
         })
       } catch (err) {
@@ -1412,13 +1452,12 @@ export function createAuthStore({
         }
         set({ reconnecting: true, error: null })
         try {
-          // The seed survives grant expiry; only the grants need renewing, and
-          // the record carries the storage location the continuity check below
-          // compares against. Peeked (not `restoreAppSession`, which WIPES an
-          // expired record -- seed included -- exactly in the case reconnect
-          // exists for), and read before the popup so the comparison baseline
-          // cannot be overwritten mid-flow. A missing seed means the session is
-          // unrecoverable in place.
+          // The seed survives grant expiry (nothing wipes it short of a logout
+          // or a clear-data, a reload included); only the grants need renewing,
+          // and the record carries the storage location the continuity check
+          // below compares against. Read before the popup so the comparison
+          // baseline cannot be overwritten mid-flow. A missing seed means the
+          // session is unrecoverable in place.
           const { seed, record } = await peekAppSession({ store: sessionStore })
           if (!seed) {
             await get().logout()

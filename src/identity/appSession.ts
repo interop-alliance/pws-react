@@ -10,9 +10,11 @@
  *
  * Record: `{ seed, controllerDid, baseUrl, spaceId, grants, expires }`.
  * `baseUrl` is the WAS server's base URL (`ParsedGrants.baseUrl`).
- * `expires` is the earliest `expires` across the granted zcaps; a record past
- * it is cleared on load and the caller falls through to the returning-login
- * flow (same seed comes back from the wallet, same DID, same vault keys).
+ * `expires` is the earliest `expires` across the granted zcaps. A record past
+ * it is NOT cleared on load: the seed is still the identity the connected
+ * replica is encrypted under, and only the grants need renewing, so a reload
+ * after expiry restores the replica and lands `reconnect`. Clearing is a
+ * logout's or a clear-data's job (`clearAppSession`).
  *
  * Persistence rides on a `SeedStore` (see `seedStore.ts`) the caller supplies.
  */
@@ -31,9 +33,10 @@ export interface AppSessionRecord {
 }
 
 /**
- * A restored session: the record plus the separately persisted seed.
+ * A whole persisted session: the record plus the separately persisted seed,
+ * the shape `persistAppSession` takes.
  */
-export interface RestoredAppSession extends AppSessionRecord {
+export interface AppSession extends AppSessionRecord {
   seed: Uint8Array
 }
 
@@ -97,7 +100,7 @@ export function earliestExpiry(grants: IZcap[]): string | null {
  * Persists the session (seed + record) for hot restore.
  *
  * @param options {object}
- * @param options.session {RestoredAppSession}
+ * @param options.session {AppSession}
  * @param options.store {SeedStore}
  * @returns {Promise<void>}
  */
@@ -105,7 +108,7 @@ export async function persistAppSession({
   session,
   store
 }: {
-  session: RestoredAppSession
+  session: AppSession
   store: SeedStore
 }): Promise<void> {
   const { seed, ...record } = session
@@ -136,13 +139,11 @@ function isAppSessionRecord(stored: unknown): stored is AppSessionRecord {
 
 /**
  * Reads the persisted seed and session record WITHOUT clearing anything and
- * WITHOUT applying the expiry rule -- the reconnect path's read, where the
- * record being past its expiry is the normal case and the seed must survive it
- * (only the grants need renewing). Either half comes back `null` when it is
- * missing or malformed.
- *
- * Use {@link restoreAppSession} for a hot restore instead: it enforces the
- * expiry and wipes a stale record.
+ * WITHOUT judging the expiry: both the hot restore and the reconnect path read
+ * through this, and each applies {@link isExpired} to the record itself. A
+ * record past its expiry is the normal case for reconnect, and the seed must
+ * survive it (only the grants need renewing). Either half comes back `null`
+ * when it is missing or malformed.
  *
  * @param options {object}
  * @param options.store {SeedStore}
@@ -160,30 +161,6 @@ export async function peekAppSession({ store }: { store: SeedStore }): Promise<{
     seed: seed ?? null,
     record: isAppSessionRecord(stored) ? stored : null
   }
-}
-
-/**
- * Restores the persisted session, or returns `null` (clearing any stale state)
- * when it is missing, malformed, or expired.
- *
- * @param options {object}
- * @param options.store {SeedStore}
- * @returns {Promise<RestoredAppSession | null>}
- */
-export async function restoreAppSession({
-  store
-}: {
-  store: SeedStore
-}): Promise<RestoredAppSession | null> {
-  const { seed, record } = await peekAppSession({ store })
-  if (!seed || !record) {
-    return null
-  }
-  if (isExpired(record.expires)) {
-    await clearAppSession({ store })
-    return null
-  }
-  return { seed, ...record }
 }
 
 /**

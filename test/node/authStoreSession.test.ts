@@ -12,6 +12,9 @@
  *   fails, instead of wiping the seed and logging out;
  * - `boot()` with a grant set that does not cover every configured collection
  *   lands `reconnect` (the proactive banner);
+ * - `boot()` over a persisted session whose grants have expired lands
+ *   `reconnect` over the connected replica, seed intact and no sync started,
+ *   and `reconnect()` then renews the grants and starts replication;
  * - `destroy()` tears the session down WITHOUT wiping the persisted record, so a
  *   fresh `boot()` re-opens it `connected`.
  *
@@ -26,18 +29,27 @@ import {
   type WasAuthStore
 } from '../../src/session/authStore.js'
 import {
+  createDescriptorCache,
   createSeedStore,
   type SeedStore
 } from '../../src/identity/seedStore.js'
-import { deriveIdentity } from '../../src/identity/agents.js'
+import { mintRecordEncryption } from '../../src/index.js'
 import {
+  deriveIdentity,
+  type IdentityAgents
+} from '../../src/identity/agents.js'
+import {
+  peekAppSession,
   persistAppSession,
-  restoreAppSession
+  type AppSession
 } from '../../src/identity/appSession.js'
 import { requestGrants } from '../../src/auth/loginFlow.js'
 import { parseGrants } from '../../src/grants.js'
-import { startWasSync } from '../../src/storage/wasSync.js'
-import { hasStore } from '../../src/storage/storageManager.js'
+import {
+  readRemoteDescriptors,
+  startWasSync
+} from '../../src/storage/wasSync.js'
+import { hasStore, requireStore } from '../../src/storage/storageManager.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../../src/log.js'
 import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
@@ -59,6 +71,7 @@ vi.mock('../../src/auth/loginFlow.js', async importOriginal => {
 
 const requestGrantsMock = vi.mocked(requestGrants)
 const startWasSyncMock = vi.mocked(startWasSync)
+const readRemoteDescriptorsMock = vi.mocked(readRemoteDescriptors)
 
 function baseConfig(collections: { key: string; id: string }[]): WasAppConfig {
   return {
@@ -96,6 +109,30 @@ function noteGrants(): IZcap[] {
       invocationTarget: 'http://localhost:3999/space/space-1/notes'
     }
   ] as unknown as IZcap[]
+}
+
+/**
+ * The persisted session record every connected fixture here writes: the seed's
+ * own identity at the one dev server and Space `noteGrants()` names.
+ */
+async function sessionRecord({
+  seed,
+  grants,
+  expires
+}: {
+  seed: Uint8Array
+  grants: IZcap[]
+  expires: string
+}): Promise<AppSession> {
+  const identity = await deriveIdentity({ seed })
+  return {
+    seed,
+    controllerDid: identity.controllerDid,
+    baseUrl: 'http://localhost:3999',
+    spaceId: 'space-1',
+    grants,
+    expires
+  }
 }
 
 /**
@@ -146,16 +183,8 @@ async function connectedStore({
   expires?: string
 }): Promise<{ store: WasAuthStore; seed: Uint8Array }> {
   const seed = crypto.getRandomValues(new Uint8Array(32))
-  const identity = await deriveIdentity({ seed })
   await persistAppSession({
-    session: {
-      seed,
-      controllerDid: identity.controllerDid,
-      baseUrl: 'http://localhost:3999',
-      spaceId: 'space-1',
-      grants,
-      expires
-    },
+    session: await sessionRecord({ seed, grants, expires }),
     store: seedStore
   })
   const store = createAuthStore({ config, registry: reg, seedStore })
@@ -167,17 +196,13 @@ async function connectedStore({
 describe('activateConnected fallback on failure', () => {
   it('falls back to a usable local replica and surfaces the open error', async () => {
     const seed = crypto.getRandomValues(new Uint8Array(32))
-    const identity = await deriveIdentity({ seed })
     const seedStore = newSeedStore()
     await persistAppSession({
-      session: {
+      session: await sessionRecord({
         seed,
-        controllerDid: identity.controllerDid,
-        baseUrl: 'http://localhost:3999',
-        spaceId: 'space-1',
         grants: noteGrants(),
         expires: futureIso(FAR_FUTURE_MS)
-      },
+      }),
       store: seedStore
     })
 
@@ -284,16 +309,12 @@ describe('reconnect() with a failing re-grant', () => {
 
     // Model the exact bug: the persisted record is now past its expiry (only
     // the grants need renewing; the seed survives).
-    const identity = await deriveIdentity({ seed })
     await persistAppSession({
-      session: {
+      session: await sessionRecord({
         seed,
-        controllerDid: identity.controllerDid,
-        baseUrl: 'http://localhost:3999',
-        spaceId: 'space-1',
         grants: noteGrants(),
         expires: pastIso(1000)
-      },
+      }),
       store: seedStore
     })
 
@@ -303,7 +324,7 @@ describe('reconnect() with a failing re-grant', () => {
 
     await store.getState().reconnect()
 
-    // The seed survived (old code wiped it via restoreAppSession) and the
+    // The seed survived (nothing on the reconnect path wipes it) and the
     // session was not torn down to `local`.
     expect(await seedStore.loadSeed()).not.toBeNull()
     expect(store.getState().status).toBe('reconnect')
@@ -430,10 +451,173 @@ describe('destroy()', () => {
     expect(store.getState().status).toBe('boot')
     expect(hasStore()).toBe(false)
     // The persisted record survives, so a StrictMode remount can re-boot.
-    expect(await restoreAppSession({ store: seedStore })).not.toBeNull()
+    expect((await peekAppSession({ store: seedStore })).record).not.toBeNull()
 
     await store.getState().boot()
     expect(store.getState().status).toBe('connected')
+  })
+})
+
+describe('boot() over an expired persisted session', () => {
+  /**
+   * Connects a store, writes one entity into the connected replica, tears the
+   * store down, and re-persists the same session with its grants expired, so
+   * the next `boot()` is the overnight-expiry reload.
+   *
+   * `collections` defaults to `notes` alone, granted and cached. The offline
+   * descriptor cache an earlier connected session left behind is written for
+   * the ids in `cached` (the mocked descriptor read answers "no descriptor",
+   * so it is the only source either boot opens a cipher from), wrapped to the
+   * session identity unless `cacheRecipient` names another key. The first
+   * connected boot and its write are skipped under `connectFirst: false`, for
+   * a cache the replica cannot open at all.
+   */
+  async function expiredSession({
+    collections = [{ key: 'notes', id: 'notes' }],
+    cached = ['notes'],
+    cacheRecipient,
+    connectFirst = true
+  }: {
+    collections?: { key: string; id: string }[]
+    cached?: string[]
+    cacheRecipient?: IdentityAgents['keyAgreementKey']
+    connectFirst?: boolean
+  } = {}) {
+    const config = baseConfig(collections)
+    const seedStore = newSeedStore()
+    const seed = crypto.getRandomValues(new Uint8Array(32))
+    const identity = await deriveIdentity({ seed })
+    const cache = createDescriptorCache({
+      store: seedStore,
+      controller: identity.controllerDid
+    })
+    for (const collectionId of cached) {
+      await cache.writeDescriptor({
+        collectionId,
+        descriptor: await mintRecordEncryption({
+          keyAgreementKey: cacheRecipient ?? identity.keyAgreementKey
+        })
+      })
+    }
+    const session = await sessionRecord({
+      seed,
+      grants: collections.map(
+        ({ id }) =>
+          ({
+            id: `urn:zcap:${id}`,
+            invocationTarget: `http://localhost:3999/space/space-1/${id}`
+          }) as unknown as IZcap
+      ),
+      expires: futureIso(FAR_FUTURE_MS)
+    })
+    await persistAppSession({ session, store: seedStore })
+    if (connectFirst) {
+      const first = createAuthStore({ config, registry, seedStore })
+      liveStores.push(first)
+      await first.getState().boot()
+      expect(first.getState().status).toBe('connected')
+      const id = crypto.randomUUID()
+      await requireStore().insertEntity('notes', { id, title: 'overnight' })
+      await first.getState().destroy()
+    }
+    await persistAppSession({
+      session: { ...session, expires: pastIso(1000) },
+      store: seedStore
+    })
+    const syncStartsBefore = startWasSyncMock.mock.calls.length
+    const readsBefore = readRemoteDescriptorsMock.mock.calls.length
+    const store = createAuthStore({ config, registry, seedStore })
+    liveStores.push(store)
+    await store.getState().boot()
+    return { store, seedStore, seed, identity, syncStartsBefore, readsBefore }
+  }
+
+  it('lands reconnect over the connected replica, seed intact, with no sync started', async () => {
+    const { store, seedStore, seed, identity, syncStartsBefore } =
+      await expiredSession()
+
+    expect(store.getState().status).toBe('reconnect')
+    expect(store.getState().controllerDid).toBe(identity.controllerDid)
+    expect(store.getState().error).toBeNull()
+    // The user's own replica is open behind the banner, not an anonymous one.
+    expect(hasStore()).toBe(true)
+    expect(await requireStore().listEntities('notes')).toHaveLength(1)
+    // Nothing was wiped and nothing invoked the expired grants.
+    expect(await seedStore.loadSeed()).toEqual(seed)
+    expect((await peekAppSession({ store: seedStore })).record).not.toBeNull()
+    expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore)
+  })
+
+  it('opens a collection the cache does not cover fail-closed, with no live read', async () => {
+    // `tasks` is granted but was never cached: the expired grants cannot read
+    // its descriptor, so it waits for the reconnect's sync bootstrap.
+    const { store, readsBefore } = await expiredSession({
+      collections: [
+        { key: 'notes', id: 'notes' },
+        { key: 'tasks', id: 'tasks' }
+      ]
+    })
+
+    expect(store.getState().status).toBe('reconnect')
+    expect(store.getState().error).toBeNull()
+    expect(readRemoteDescriptorsMock.mock.calls.length).toBe(readsBefore)
+    // The cached collection is readable and writable behind the banner...
+    expect(await requireStore().listEntities('notes')).toHaveLength(1)
+    await requireStore().insertEntity('notes', {
+      id: crypto.randomUUID(),
+      title: 'offline'
+    })
+    // ...while the uncached one refuses writes rather than sealing under a
+    // guessed key.
+    await expect(
+      requireStore().insertEntity('tasks', {
+        id: crypto.randomUUID(),
+        title: 'refused'
+      })
+    ).rejects.toThrow(/no key-epoch encryption descriptor/)
+  })
+
+  it('clears the record when the expired activation fails, landing a clean local', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // The cached roster wraps no key to this app (rotated off since the last
+    // session), so opening the connected replica raises from the cipher build.
+    const other = await deriveIdentity({
+      seed: crypto.getRandomValues(new Uint8Array(32))
+    })
+    const { store, seedStore } = await expiredSession({
+      cacheRecipient: other.keyAgreementKey,
+      connectFirst: false
+    })
+
+    expect(store.getState().status).toBe('local')
+    expect(store.getState().error).not.toBeNull()
+    expect(hasStore()).toBe(true)
+    // Nothing is left for a reload to re-run: the next boot is an ordinary
+    // anonymous `local`, and the next login brings the same seed back.
+    expect(await seedStore.loadSeed()).toBeNull()
+    expect((await peekAppSession({ store: seedStore })).record).toBeNull()
+  })
+
+  it('reconnect() renews the grants, persists the record, and starts replication', async () => {
+    const { store, seedStore, syncStartsBefore } = await expiredSession()
+    const grants = noteGrants()
+    const expires = futureIso(FAR_FUTURE_MS)
+    requestGrantsMock.mockResolvedValue({
+      grants,
+      parsed: parseGrants(grants),
+      expires
+    })
+
+    await store.getState().reconnect()
+
+    expect(store.getState().status).toBe('connected')
+    expect(store.getState().expires).toBe(expires)
+    expect(store.getState().reconnecting).toBe(false)
+    expect((await peekAppSession({ store: seedStore })).record?.expires).toBe(
+      expires
+    )
+    expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore + 1)
+    expect(await requireStore().listEntities('notes')).toHaveLength(1)
   })
 })
 
@@ -487,7 +671,7 @@ describe('reconnect() with the session torn down while the popup is open', () =>
     expect(store.getState().controllerDid).toBe(anonDid)
     expect(store.getState().reconnecting).toBe(false)
     expect(store.getState().error).toBeNull()
-    expect(await restoreAppSession({ store: seedStore })).toBeNull()
+    expect((await peekAppSession({ store: seedStore })).record).toBeNull()
     expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore)
     expect(hasStore()).toBe(true)
   })
@@ -507,7 +691,7 @@ describe('reconnect() with the session torn down while the popup is open', () =>
     expect(store.getState().controllerDid).toBe(anonDid)
     expect(store.getState().reconnecting).toBe(false)
     expect(await seedStore.loadSeed()).toBeNull()
-    expect(await restoreAppSession({ store: seedStore })).toBeNull()
+    expect((await peekAppSession({ store: seedStore })).record).toBeNull()
     expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore)
     expect(hasStore()).toBe(true)
   })

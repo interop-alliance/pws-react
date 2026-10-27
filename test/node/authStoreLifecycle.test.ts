@@ -31,7 +31,7 @@ import {
 import { deriveIdentity } from '../../src/identity/agents.js'
 import {
   persistAppSession,
-  restoreAppSession
+  peekAppSession
 } from '../../src/identity/appSession.js'
 import {
   createSeedStore,
@@ -286,7 +286,7 @@ describe('serialized boot/destroy lifecycle', () => {
     expect(store.getState().status).toBe('local')
     expect(store.getState().error).toBeNull()
     expect(hasStore()).toBe(true)
-    expect(await restoreAppSession({ store: seedStore })).toBeNull()
+    expect((await peekAppSession({ store: seedStore })).record).toBeNull()
     const id = crypto.randomUUID()
     await requireStore().insertEntity('notes', { id, title: 'after-logout' })
     expect(await requireStore().listEntities('notes')).toHaveLength(1)

@@ -528,10 +528,11 @@ attempt to settle before choosing between the app and the login page. A login in
 flight is NOT a status -- it is the `phase` field, which `useSession()` /
 `useLogin()` also surface as the derived boolean `authenticating`.
 
-- **Restore (zero popups).** On mount, `restore()` reads the persisted session
-  from IndexedDB and, if present and consistent, re-derives the identity, opens
-  the local store, hydrates, and starts sync with no wallet interaction. A
-  missing, corrupt, or wrong-server record falls through to `unauthenticated`.
+- **Restore (zero popups).** On mount, `boot()` reads the persisted session from
+  IndexedDB and, if present and consistent, re-derives the identity, opens the
+  local store, hydrates, and starts sync with no wallet interaction. A record
+  whose grants have expired opens the same store but starts no sync and lands
+  `reconnect`. A missing or corrupt record falls through to `local`.
 - **Login.** `useLogin().login()` runs the full [login flow](#login-flow).
 - **Reconnect.** Grants are expiry-only. The store watches the earliest grant
   expiry and, once within the warning window (`expiry.warningMs`, default 1h) or
