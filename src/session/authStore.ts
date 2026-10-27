@@ -808,18 +808,38 @@ export function createAuthStore({
       })
     } catch (err) {
       await deactivateStore()
-      // A fallback that fails is warned about, not surfaced: the error the
-      // caller sees is the activation's own, never the one hiding behind it.
-      try {
-        await openLocal()
-      } catch (localErr) {
-        log.warn(
-          'Failed to re-open the local replica after a connected activation ' +
-            'failure',
-          { err: localErr }
-        )
-      }
+      // The error the caller sees is the activation's own, never the one a
+      // failed fallback hides behind it (`reopenLocal` records that one).
+      await reopenLocal()
       throw err
+    }
+  }
+
+  /**
+   * Re-opens the anonymous replica after the live one was torn down, landing
+   * `local`. When even that fails (an anonymous replica whose stored schema
+   * hash no longer matches, an IndexedDB error), the session lands `local`
+   * anyway, with no replica attached and the failure on `error`, rather than
+   * keeping a status that names a connected session whose replica is gone and
+   * whose record may be cleared. The one exception is a session still in
+   * `boot`, whose fatal state is `boot` with `error`: that failure is left to
+   * `boot` to surface.
+   *
+   * @returns {Promise<void>}
+   */
+  async function reopenLocal(): Promise<void> {
+    try {
+      await openLocal()
+    } catch (err) {
+      log.warn('Failed to re-open the anonymous local replica', { err })
+      if (store.getState().status !== 'boot') {
+        store.setState({
+          status: 'local',
+          controllerDid: null,
+          expires: null,
+          error: errorMessage(err)
+        })
+      }
     }
   }
 
@@ -828,7 +848,7 @@ export function createAuthStore({
    * persisted seed (the anonymous seed and the session record survive), and
    * releases the active storage-context pointer when this session holds it.
    * Closes the database by default; `deleteDb` deletes it instead (the wipe
-   * paths, via {@link resetToFreshLocal}).
+   * paths).
    *
    * @param [options] {object}
    * @param [options.deleteDb] {boolean}   delete the database rather than
@@ -899,27 +919,6 @@ export function createAuthStore({
       anonControllerDid,
       storageKeyPrefix: config.storageKeyPrefix ?? DEFAULT_STORAGE_KEY_PREFIX
     })
-  }
-
-  /**
-   * Tears the current replica down and re-opens a fresh `local` replica. The
-   * logout path: `deleteDb` deletes the replica that is open rather than
-   * closing it (logout-and-erase), and the persisted anonymous seed is left
-   * alone either way, so a local-first app keeps working logged out. The
-   * clear-data path does not come through here -- it enumerates and deletes
-   * every database this app wrote (see `clearLocalData`).
-   *
-   * @param options {object}
-   * @param options.deleteDb {boolean}
-   * @returns {Promise<void>}
-   */
-  async function resetToFreshLocal({
-    deleteDb
-  }: {
-    deleteDb: boolean
-  }): Promise<void> {
-    await deactivateStore({ deleteDb })
-    await openLocal()
   }
 
   /**
@@ -1468,7 +1467,15 @@ export function createAuthStore({
             get().status === 'connected' || get().status === 'reconnect'
           const targets =
             wipe && connected ? await snapshotWipe('logout') : null
-          await resetToFreshLocal({ deleteDb: wipe })
+          // Tear down, clear the record, wipe, and only then re-open the
+          // anonymous replica: the record goes before the re-open so a
+          // re-open that fails (a stored schema hash that no longer matches
+          // after an upgrade) never leaves the wallet seed on disk for a
+          // reload to hot-restore. `deleteDb` deletes the open replica rather
+          // than closing it (logout-and-erase); the persisted anonymous seed
+          // is left alone either way, so a local-first app keeps working
+          // logged out.
+          await deactivateStore({ deleteDb: wipe })
           await clearAppSession({ store: sessionStore })
           if (targets) {
             // RxDB's own removal clears each collection's table but leaves its
@@ -1480,8 +1487,9 @@ export function createAuthStore({
               ...(storage && { storage })
             })
           }
-          // `resetToFreshLocal` already landed `local` (fresh anon replica);
-          // clear the remaining transients.
+          // Lands `local` (a fresh anonymous replica, or none with the
+          // failure on `error`); clear the remaining transients.
+          await reopenLocal()
           set({ phase: null, reconnecting: false })
         }),
 

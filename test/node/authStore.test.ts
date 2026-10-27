@@ -805,6 +805,42 @@ describe('logout()', () => {
     expect(removeSpy).toHaveBeenCalledTimes(1)
     expect(await seedStore.loadSeed()).toBeNull()
   })
+
+  it('clears the session record and lands local with an error when the anonymous replica cannot re-open', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const config = baseConfig()
+    const seedStore = newSeedStore()
+    const { seed } = await persistSession({ seedStore })
+    const connectedDb = await connectedDbFor(config, seed)
+    // The hot restore opens the connected replica alone, so the first open
+    // of any other database is the logout's anonymous re-open.
+    const gate = gatedStorage({ match: name => name !== connectedDb })
+    const store = createAuthStore({
+      config,
+      registry,
+      seedStore,
+      storage: gate.storage
+    })
+    liveStores.push(store)
+    await store.getState().boot()
+    expect(store.getState().status).toBe('connected')
+
+    const loggingOut = store.getState().logout()
+    await gate.entered
+    gate.fail(new Error('anon re-open boom'))
+    await loggingOut
+
+    // The record went before the re-open was attempted, so a reload cannot
+    // hot-restore the session the user just logged out of.
+    expect(await seedStore.loadSeed()).toBeNull()
+    // No replica is attached, and the status says so rather than naming the
+    // torn-down connected session.
+    expect(hasStore()).toBe(false)
+    expect(store.getState().status).toBe('local')
+    expect(store.getState().controllerDid).toBeNull()
+    expect(store.getState().expires).toBeNull()
+    expect(store.getState().error).toMatch(/anon re-open boom/)
+  })
 })
 
 /**

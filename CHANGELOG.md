@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- `logout` clears the persisted session record before the anonymous replica
+  re-opens, so a re-open that fails no longer leaves the wallet seed on disk for
+  a reload to hot-restore. A failed re-open, in `logout` and in a connected
+  activation's fallback, now lands `local` with no replica and the failure on
+  `error` instead of keeping the previous status with no replica attached.
 - `AdoptDialog` swallows the rejection of the `login({ adopt })` it starts. The
   store already records a failed login on `useLogin().error`, so a wallet
   without App Connect support or a failed activation no longer also escapes the

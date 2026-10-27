@@ -252,16 +252,19 @@ describe('activateConnected fallback on failure', () => {
         store.getState().connectWithGrants({ seed, grants: noteGrants() })
       ).rejects.toThrow(/connected hydrate boom/)
 
-      // The fallback's own failure is warned about, not surfaced in its place.
+      // The fallback's own failure is warned about, not surfaced in its place,
+      // and the session still lands local, with no replica attached.
       expect(
         capture.events.some(
           event =>
             event.level === 'warn' &&
-            event.msg.includes('local replica after a connected activation') &&
+            event.msg.includes('re-open the anonymous local replica') &&
             event.err instanceof Error
         )
       ).toBe(true)
       expect(store.getState().error).toMatch(/connected hydrate boom/)
+      expect(store.getState().status).toBe('local')
+      expect(store.getState().controllerDid).toBeNull()
     } finally {
       setLogger(previous)
     }

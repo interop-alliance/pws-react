@@ -142,7 +142,14 @@ after a logout. A cancelled or failed login leaves `local` intact either way.
 choice at all (`AdoptDialog` is the shipped affordance).
 
 `logout({ wipe })` returns to a fresh `local`, optionally deleting the connected
-replica's database; `clearLocalData()` deletes every database this app wrote
+replica's database. It clears the persisted session record before the anonymous
+replica re-opens, so a re-open that fails (an anonymous replica whose stored
+schema hash no longer matches after an upgrade) never leaves the wallet seed on
+disk for a reload to hot-restore. A failed re-open, there or in a connected
+activation's fallback, still lands `local`, with no replica attached and the
+failure on `error`, rather than keeping a status that names a session whose
+replica is gone; a boot-time failure keeps `boot` with `error`, the fatal state
+`ProtectedRoute` reads. `clearLocalData()` deletes every database this app wrote
 here, mints a brand-new anonymous seed and replica, and drops any persisted
 connected session, so clearing while connected fully disconnects (both grades
 are enumerated below). `destroy()` tears the live replica down without wiping
