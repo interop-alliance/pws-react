@@ -264,6 +264,18 @@ queued meanwhile runs to completion first rather than tearing the swap apart.
 `connectWithGrants` is a no-op while a Login With Wallet flow is in flight
 (`phase` is non-null), for the mirror case.
 
+The epilogue also checks that the session it left is still the live one, by
+comparing the live `status` and `controllerDid` to the pre-login snapshot. The
+StrictMode destroy/boot pair re-opens the same session and passes. A bare
+`destroy`, a `clearLocalData`, a `connectWithGrants`, or a boot that restored a
+different session fails it. The epilogue then bails with a warning, clears
+`phase`, and `login` resolves `null`, leaving whatever session the change
+produced as it is. Otherwise it would bring a connected session up with nothing
+left to tear it down, or on top of a session the login never started from.
+Teardown is best-effort (a sync-controller stop that throws is logged and the
+rest runs), and `destroy` resets the session state even if it throws, so a
+failed destroy cannot leave the old session readable to this check.
+
 `reconnect` follows the same split. Its re-grant popup await is off the chain,
 and its epilogue (stopping the controller, persisting the renewed record,
 restarting sync, the `connected` transition) rides it. The epilogue re-checks

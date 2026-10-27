@@ -187,8 +187,12 @@ export interface AuthState {
    * Resolves with `{ firstRun }` on success (`firstRun` is true when this login
    * created a brand-new app key, so the app can show a "connected for the first
    * time" confirmation). Resolves with `null` when the user cancels a wallet
-   * popup (not an error). REJECTS on any genuine failure, after recording the
-   * message in `error` so the UI state still reflects it.
+   * popup (not an error), and also when the session changed while the popup
+   * was open (a `destroy` with no boot behind it, a `clearLocalData`, a
+   * `connectWithGrants`): the connected session is not brought up, and
+   * whatever session the change left is kept as it is. REJECTS on any genuine
+   * failure, after recording the message in `error` so the UI state still
+   * reflects it.
    *
    * @param [options] {object}
    * @param [options.adopt] {'merge' | 'leave'}
@@ -593,7 +597,13 @@ export function createAuthStore({
       pendingSync = null
     }
     if (controller) {
-      await controller.stop()
+      // Teardown is best-effort: a stop that throws is logged, and the rest
+      // of the teardown (and every caller's state reset) still runs.
+      try {
+        await controller.stop()
+      } catch (err) {
+        log.warn('Error stopping the sync controller', { err })
+      }
       controller = null
     }
     // The remote store belongs to the session that just stopped (a reconnect
@@ -1238,20 +1248,25 @@ export function createAuthStore({
     }
 
     const destroyImpl = async (): Promise<void> => {
-      await deactivateStore()
-      // Back to `boot` (not `local`) and both persisted seeds left intact: a
-      // remount's `boot()` re-opens the same session (or local). Serialized with
-      // `boot` (see `serializeLifecycle`), so this teardown always runs against a
-      // fully-open session, never an in-flight one.
-      set({
-        status: 'boot',
-        phase: null,
-        error: null,
-        controllerDid: null,
-        expires: null,
-        reconnecting: false,
-        sharedCollections: {}
-      })
+      try {
+        await deactivateStore()
+      } finally {
+        // Back to `boot` (not `local`) and both persisted seeds left intact: a
+        // remount's `boot()` re-opens the same session (or local). Serialized
+        // with `boot` (see `serializeLifecycle`), so this teardown always runs
+        // against a fully-open session, never an in-flight one. The reset
+        // lands even if the teardown throws, so a `login` epilogue never reads
+        // the old session off a failed destroy.
+        set({
+          status: 'boot',
+          phase: null,
+          error: null,
+          controllerDid: null,
+          expires: null,
+          reconnecting: false,
+          sharedCollections: {}
+        })
+      }
     }
 
     return {
@@ -1293,8 +1308,30 @@ export function createAuthStore({
           // since it swaps the process-wide holder and awaits no user
           // interaction. A `connectWithGrants` or a `destroy` queued meanwhile
           // runs to completion first instead of tearing the swap apart.
-          await serializeLifecycle(() =>
-            completeConnect({
+          return await serializeLifecycle(async () => {
+            // Bail unless the session this login left is still the live one
+            // (a StrictMode destroy/boot pair re-opens the same session and
+            // passes): the epilogue must not bring a session up on top of one
+            // the login never started from.
+            const live = get()
+            if (
+              live.status !== preLogin.status ||
+              live.controllerDid !== preLogin.controllerDid
+            ) {
+              log.warn(
+                'Login abandoned: the session changed while the wallet popup was open',
+                {
+                  before: preLogin,
+                  after: {
+                    status: live.status,
+                    controllerDid: live.controllerDid
+                  }
+                }
+              )
+              set({ phase: null })
+              return null
+            }
+            await completeConnect({
               seed: outcome.seed,
               identity: outcome.identity,
               ...(outcome.parsed && { parsed: outcome.parsed }),
@@ -1303,8 +1340,8 @@ export function createAuthStore({
               adopt,
               snapshot: preLogin
             })
-          )
-          return { firstRun: outcome.firstRun }
+            return { firstRun: outcome.firstRun }
+          })
         } catch (err) {
           // A cancel is not a failure: clear the in-flight flags without leaving a
           // scary error, and resolve with `null` so the caller can distinguish it

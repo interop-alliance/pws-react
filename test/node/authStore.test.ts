@@ -1174,25 +1174,34 @@ describe('adoption', () => {
     expect(store.getState().controllerDid).toBe(anonDid)
   })
 
-  it('collects the pre-login data even when a destroy lands mid-login', async () => {
-    const config = baseConfig()
-    const store = makeStore(config, newSeedStore())
+  /**
+   * Boots a store with one pre-login note, parks the wallet popup, and lets
+   * `login` reach the await, so the test can run a lifecycle verb underneath
+   * the open popup. `release()` lets the wallet answer.
+   */
+  async function parkLogin(
+    config: WasAppConfig,
+    seedStore: SeedStore = newSeedStore()
+  ): Promise<{
+    store: WasAuthStore
+    anonDid: string
+    identity: IdentityAgents
+    pending: Promise<{ firstRun: boolean } | null>
+    release: () => void
+  }> {
+    const store = makeStore(config, seedStore)
     await store.getState().boot()
+    const anonDid = store.getState().controllerDid!
     await requireStore().insertEntity('notes', {
       id: crypto.randomUUID(),
       title: 'pre-login'
     })
-
-    // The wallet popup parks until the test releases it, so a provider unmount
-    // (`destroy`) lands while `login` is still awaiting CHAPI. The adoption
-    // collect must decide off the PRE-LOGIN snapshot, not the live (`boot`)
-    // status the destroy left behind.
     const walletSeed = crypto.getRandomValues(new Uint8Array(32))
     const identity = await deriveIdentity({ seed: walletSeed })
     provisionIdentity(identity)
     const grants = noteGrants()
-    let releaseLogin!: () => void
-    const popup = new Promise<void>(resolve => (releaseLogin = resolve))
+    let release!: () => void
+    const popup = new Promise<void>(resolve => (release = resolve))
     loginWithWalletMock.mockImplementation(async () => {
       await popup
       return {
@@ -1204,14 +1213,43 @@ describe('adoption', () => {
         firstRun: false
       }
     })
-
     const pending = store.getState().login()
-    // Let `login` reach the awaited popup, then unmount underneath it.
+    // Let `login` reach the awaited popup.
     await new Promise(resolve => setTimeout(resolve, 0))
-    await store.getState().destroy()
-    expect(store.getState().status).toBe('boot')
+    return { store, anonDid, identity, pending, release }
+  }
 
-    releaseLogin()
+  /**
+   * The IndexedDB databases that belong to `controllerDid`'s replica. RxDB's
+   * Dexie storage names each collection's database after the replica's, so a
+   * substring match is what proves no replica was opened under that DID.
+   */
+  async function replicaDbNames(
+    config: WasAppConfig,
+    controllerDid: string
+  ): Promise<string[]> {
+    const dbName = dbNameForController({
+      dbName: config.dbName!,
+      controllerDid
+    })
+    const names = (await indexedDB.databases()).map(db => db.name ?? '')
+    return names.filter(name => name.includes(dbName))
+  }
+
+  it('collects the pre-login data even when a StrictMode destroy/boot pair lands mid-login', async () => {
+    const config = baseConfig()
+    const { store, identity, pending, release } = await parkLogin(config)
+
+    // The provider's StrictMode shape underneath the open popup: destroy
+    // (cleanup) then boot (re-mount), which re-opens the same anonymous
+    // replica. The adoption collect must decide off the PRE-LOGIN snapshot,
+    // not the live status the pair left behind.
+    const destroying = store.getState().destroy()
+    const rebooting = store.getState().boot()
+    await Promise.all([destroying, rebooting])
+    expect(store.getState().status).toBe('local')
+
+    release()
     const outcome = await pending
 
     expect(outcome).toEqual({ firstRun: false })
@@ -1223,6 +1261,112 @@ describe('adoption', () => {
       title: string
     }>('notes')
     expect(adopted.map(doc => doc.title)).toEqual(['pre-login'])
+  })
+
+  it('abandons the login when a destroy with no boot behind it lands mid-login', async () => {
+    const config = baseConfig()
+    const seedStore = newSeedStore()
+    const { store, anonDid, identity, pending, release } = await parkLogin(
+      config,
+      seedStore
+    )
+    const capture = captureLogger('wr')
+    const previous = setLogger(capture.logger)
+
+    // A real unmount: destroy, and nothing re-mounts. The provider is gone.
+    await store.getState().destroy()
+    expect(store.getState().status).toBe('boot')
+
+    release()
+    let outcome: { firstRun: boolean } | null
+    try {
+      outcome = await pending
+    } finally {
+      setLogger(previous)
+    }
+
+    // Nothing was brought up: no pointer claimed, no connected replica, and
+    // the session stays torn down rather than reporting `connected` into the
+    // void.
+    expect(outcome).toBeNull()
+    expect(store.getState().status).toBe('boot')
+    expect(store.getState().controllerDid).toBeNull()
+    expect(store.getState().phase).toBeNull()
+    expect(hasStore()).toBe(false)
+    expect(
+      capture.events.some(
+        event => event.level === 'warn' && event.msg.includes('Login abandoned')
+      )
+    ).toBe(true)
+    expect(await replicaDbNames(config, identity.controllerDid)).toEqual([])
+    // The anonymous replica is untouched: a provider mounted later boots
+    // cleanly over it, with the pre-login data still there.
+    const next = makeStore(config, seedStore)
+    await next.getState().boot()
+    expect(next.getState().status).toBe('local')
+    expect(next.getState().controllerDid).toBe(anonDid)
+    const kept = await requireStore().listEntities<{
+      id: string
+      title: string
+    }>('notes')
+    expect(kept.map(doc => doc.title)).toEqual(['pre-login'])
+  })
+
+  it('abandons the login when a clearLocalData lands mid-login', async () => {
+    const config = baseConfig()
+    const { store, anonDid, identity, pending, release } =
+      await parkLogin(config)
+
+    // The user clears everything while the popup is open: a new anonymous
+    // seed and replica replace the one the pre-login snapshot named.
+    await store.getState().clearLocalData()
+    expect(store.getState().status).toBe('local')
+    const freshDid = store.getState().controllerDid!
+    expect(freshDid).not.toBe(anonDid)
+
+    release()
+    const outcome = await pending
+
+    // The fresh anonymous session stands: nothing connected, nothing adopted,
+    // no database opened under the old name with the new keys.
+    expect(outcome).toBeNull()
+    expect(store.getState().status).toBe('local')
+    expect(store.getState().controllerDid).toBe(freshDid)
+    expect(store.getState().phase).toBeNull()
+    const kept = await requireStore().listEntities<{ id: string }>('notes')
+    expect(kept).toEqual([])
+    expect(await replicaDbNames(config, anonDid)).toEqual([])
+    expect(await replicaDbNames(config, identity.controllerDid)).toEqual([])
+    await store.getState().destroy()
+  })
+
+  it('abandons the login when a connectWithGrants lands mid-login', async () => {
+    const config = baseConfig()
+    const { store, identity, pending, release } = await parkLogin(config)
+
+    // A dev harness connects under another seed while the popup is open (the
+    // destroy clears `phase`, so the connect is not blocked). That session
+    // must stand.
+    await store.getState().destroy()
+    const otherSeed = crypto.getRandomValues(new Uint8Array(32))
+    const other = await deriveIdentity({ seed: otherSeed })
+    provisionIdentity(other)
+    await store
+      .getState()
+      .connectWithGrants({ seed: otherSeed, grants: noteGrants() })
+    expect(store.getState().status).toBe('connected')
+    expect(store.getState().controllerDid).toBe(other.controllerDid)
+
+    release()
+    const outcome = await pending
+
+    expect(outcome).toBeNull()
+    expect(store.getState().status).toBe('connected')
+    expect(store.getState().controllerDid).toBe(other.controllerDid)
+    expect(store.getState().phase).toBeNull()
+    expect(hasStore()).toBe(true)
+    expect(await replicaDbNames(config, identity.controllerDid)).toEqual([])
+    await store.getState().destroy()
   })
 })
 

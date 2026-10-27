@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- `login` resolves `null` instead of connecting when the session changed while
+  the wallet popup was open (a provider unmount with no re-mount, a
+  `clearLocalData`, a `connectWithGrants`). A sync-controller stop that throws
+  no longer aborts the teardown, and `destroy` resets the session state even
+  when its teardown throws.
 - `logout` clears the persisted session record before the anonymous replica
   re-opens, so a re-open that fails no longer leaves the wallet seed on disk for
   a reload to hot-restore. A failed re-open, in `logout` and in a connected
