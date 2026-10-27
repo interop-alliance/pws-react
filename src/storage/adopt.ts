@@ -15,9 +15,11 @@
  *   a connected doc without LWW fields always loses to a stamped adopted one.
  *
  * Adopted payloads missing `updatedAt`/`writerId` are stamped at adoption time
- * with the session's resolved writer id (the sync layer's conflict resolution
- * requires them); payloads that already carry them keep their original values,
- * so a doc edited long ago does not suddenly outrank fresher remote edits.
+ * (the sync layer's conflict resolution requires them), each field on its own:
+ * a missing `updatedAt` becomes the adoption instant and a missing `writerId`
+ * becomes the session's resolved writer id, while a field already present
+ * keeps its original value, so a doc edited long ago does not suddenly outrank
+ * fresher remote edits.
  * That preserve-if-present rule is deliberately unlike the entity-store write
  * verbs, which always stamp fresh: this is a repair of an existing edit, not a
  * new one.
@@ -42,7 +44,7 @@ import type { LocalStore } from './localStore.js'
  * @param options.entities {Record<string, Array<{ id: string }>>}   decrypted
  *   payloads per collection key, as collected from the anonymous replica
  * @param options.writerId {string}   the session's writer id, stamped onto
- *   adopted payloads that carry no LWW fields
+ *   adopted payloads that carry no `writerId` of their own
  * @returns {Promise<void>}
  */
 export async function mergeAdopted({
@@ -54,7 +56,7 @@ export async function mergeAdopted({
   entities: Record<string, Array<{ id: string }>>
   writerId: string
 }): Promise<void> {
-  let stamp: { updatedAt: string; writerId: string } | null = null
+  let now: string | null = null
   // Collections are separate RxDB collections and each logical uuid appears at
   // most once per collection, so every write below is independent of every
   // other: they run concurrently rather than one round trip at a time.
@@ -68,12 +70,22 @@ export async function mergeAdopted({
           let adopted = payload
           let adoptedLww = lwwFields(payload)
           if (!adoptedLww) {
-            stamp ??= {
-              updatedAt: new Date().toISOString(),
-              writerId
+            // Fill each field on its own: a payload carrying `updatedAt` but
+            // no `writerId` keeps the instant it was edited, rather than being
+            // re-stamped to now and outranking newer connected edits.
+            const { updatedAt, writerId: payloadWriterId } = payload as {
+              updatedAt?: unknown
+              writerId?: unknown
             }
-            adopted = { ...payload, ...stamp }
-            adoptedLww = stamp
+            adoptedLww = {
+              updatedAt:
+                typeof updatedAt === 'string'
+                  ? updatedAt
+                  : (now ??= new Date().toISOString()),
+              writerId:
+                typeof payloadWriterId === 'string' ? payloadWriterId : writerId
+            }
+            adopted = { ...payload, ...adoptedLww }
           }
           const current = existing.get(payload.id)
           if (!current) {

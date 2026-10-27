@@ -12,6 +12,10 @@
 
 ### Fixed
 
+- The adoption merge fills a missing `updatedAt` and a missing `writerId` each
+  on its own. A payload carrying `updatedAt` but no `writerId` keeps its
+  original instant instead of being re-stamped to the adoption time and
+  outranking newer connected edits.
 - An epoch-roster entry that names this app but fails its key-wrap check
   (`IntegrityError` from `@interop/was-client` 0.99.1) is routed as a tamper
   signal: the local store records it as the collection's spent refusal, and the

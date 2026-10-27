@@ -133,6 +133,50 @@ describe('mergeAdopted', () => {
     expect(listed[0]!.writerId).toBe('device-original')
   })
 
+  it('keeps updatedAt and fills only the missing writerId', async () => {
+    const source = await openStore(1)
+    const connected = await openStore(2)
+    await source.insertEntity(COLLECTION, {
+      id: crypto.randomUUID(),
+      title: 'half-stamped',
+      updatedAt: '2025-05-05T00:00:00.000Z'
+    })
+
+    await mergeAdopted({
+      store: connected,
+      entities: await collect(source),
+      writerId: MERGE_CLIENT_ID
+    })
+
+    const listed = await connected.listEntities<Note>(COLLECTION)
+    expect(listed).toHaveLength(1)
+    // The edit's own instant survives; only the absent field is filled.
+    expect(listed[0]!.updatedAt).toBe('2025-05-05T00:00:00.000Z')
+    expect(listed[0]!.writerId).toBe(MERGE_CLIENT_ID)
+  })
+
+  it('keeps writerId and fills only the missing updatedAt', async () => {
+    const source = await openStore(1)
+    const connected = await openStore(2)
+    await source.insertEntity(COLLECTION, {
+      id: crypto.randomUUID(),
+      title: 'half-stamped',
+      writerId: 'device-original'
+    })
+
+    await mergeAdopted({
+      store: connected,
+      entities: await collect(source),
+      writerId: MERGE_CLIENT_ID
+    })
+
+    const listed = await connected.listEntities<Note>(COLLECTION)
+    expect(listed).toHaveLength(1)
+    expect(typeof listed[0]!.updatedAt).toBe('string')
+    expect(listed[0]!.updatedAt!.length).toBeGreaterThan(0)
+    expect(listed[0]!.writerId).toBe('device-original')
+  })
+
   it('updates the existing doc when the adopted payload wins LWW', async () => {
     const source = await openStore(1)
     const connected = await openStore(2)

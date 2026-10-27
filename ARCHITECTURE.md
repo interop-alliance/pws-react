@@ -147,13 +147,15 @@ otherwise replace only when the adopted payload wins the same
 `remotePayloadWins` last-write-wins rule replication runs (owned by
 `@interop/social-core`, so every wallet and app converges on one rule), with a
 connected doc carrying no LWW fields always losing to a stamped adopted one.
-Adopted payloads missing `updatedAt` / `writerId` are stamped at adoption time
-with the session's resolved `writerId` (the storage context's, the same value
-the write verbs stamp from), so the repair carries the same attribution identity
-as the app's own writes; payloads that already carry them keep their original
-values. That preserve-if-present rule is deliberately unlike the write verbs'
-fresh-always one: adoption repairs an edit already made, rather than recording a
-new one.
+Adopted payloads missing `updatedAt` / `writerId` are stamped at adoption time,
+each field on its own. A missing `updatedAt` becomes the adoption instant and a
+missing `writerId` becomes the session's resolved `writerId` (the storage
+context's, the same value the write verbs stamp from), so the repair carries the
+same attribution identity as the app's own writes. A field already present keeps
+its original value, so a payload with an old `updatedAt` and no `writerId` is
+not re-stamped to now. That preserve-if-present rule is deliberately unlike the
+write verbs' fresh-always one: adoption repairs an edit already made, rather
+than recording a new one.
 
 `adopt: 'leave'` sets the anonymous replica aside untouched instead; it returns
 after a logout. A cancelled or failed login leaves `local` intact either way.
