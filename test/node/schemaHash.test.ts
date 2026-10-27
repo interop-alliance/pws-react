@@ -16,6 +16,13 @@
  * answer rather than an oversight: if this test ever goes green, the note has
  * gone stale.
  *
+ * The second test pins what `LocalStore.init` does with the refusal: the store
+ * is never returned, so `init` itself closes the database it opened. RxDB
+ * holds an open database's name process-wide and refuses a second plain open
+ * of it, which is what the test leans on: a re-open with neither
+ * `closeDuplicates` nor `ignoreDuplicate` only succeeds once the first is
+ * closed.
+ *
  * @vitest-environment node
  */
 import 'fake-indexeddb/auto'
@@ -23,6 +30,8 @@ import { describe, expect, it } from 'vitest'
 import { createRxDatabase } from 'rxdb/plugins/core'
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 import { syncedDocSchema } from '@interop/was-sync'
+import { LocalStore } from '../../src/storage/localStore.js'
+import { deriveIdentity } from '../../src/identity/agents.js'
 
 /**
  * The synced-doc schema as `@interop/was-sync` 0.7 declared it: the integer
@@ -76,5 +85,40 @@ describe('the synced-doc schema hash', () => {
       after.addCollections({ notes: { schema: syncedDocSchema() as never } })
     ).rejects.toThrow()
     await after.close()
+  })
+
+  it('closes the database LocalStore.init opened when the refusal lands', async () => {
+    const name = `schemahashinit${Date.now()}`
+    const storage = getRxStorageDexie()
+    const before = await createRxDatabase({
+      name,
+      storage,
+      multiInstance: false
+    })
+    await before.addCollections({
+      notes: { schema: previousSyncedDocSchema() as never }
+    })
+    await before.close()
+
+    const seed = new Uint8Array(32).map((_, index) => (index * 5 + 1) & 0xff)
+    const { keyAgreementKey, keyResolver } = await deriveIdentity({ seed })
+    await expect(
+      LocalStore.init({
+        keyAgreementKey,
+        keyResolver,
+        collections: [{ key: 'notes', id: 'notes', visibility: 'public' }],
+        storage,
+        dbName: name
+      })
+    ).rejects.toThrow()
+
+    // Would reject with RxDB's duplicate-database error (DB8) were the
+    // refused open still holding the name.
+    const reopened = await createRxDatabase({
+      name,
+      storage,
+      multiInstance: false
+    })
+    await reopened.close()
   })
 })

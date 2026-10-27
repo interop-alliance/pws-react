@@ -547,9 +547,20 @@ export class LocalStore {
         ]
       })
     )
-    const collectionsMap = (await db.addCollections(
-      collectionsConfig
-    )) as unknown as Record<string, RxCollection<SyncedDoc>>
+    let collectionsMap: Record<string, RxCollection<SyncedDoc>>
+    try {
+      collectionsMap = (await db.addCollections(
+        collectionsConfig
+      )) as unknown as Record<string, RxCollection<SyncedDoc>>
+    } catch (err) {
+      // The store is never returned from here, so nothing downstream can
+      // close the database this call opened. A refusal (a stored schema hash
+      // that no longer matches the declared one) would otherwise leave it
+      // open, with whatever collections it did register counted toward
+      // RxDB's process-wide cap, and hold the database name against a retry.
+      await db.close().catch(() => undefined)
+      throw err
+    }
 
     const store = new LocalStore({
       db,

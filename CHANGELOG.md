@@ -12,6 +12,9 @@
 
 ### Fixed
 
+- `LocalStore.init` closes the database it opened when `addCollections` refuses
+  (a stored schema hash that no longer matches), instead of leaving it open with
+  its collections counted toward RxDB's process-wide cap.
 - The adoption merge fills a missing `updatedAt` and a missing `writerId` each
   on its own. A payload carrying `updatedAt` but no `writerId` keeps its
   original instant instead of being re-stamped to the adoption time and
