@@ -54,7 +54,11 @@ import {
 import type { SharedCollectionReader } from '../storage/sharedCollectionReader.js'
 import { createDocumentLoader } from '../identity/documentLoader.js'
 import { deriveIdentity, type IdentityAgents } from '../identity/agents.js'
-import { createSeedStore, type SeedStore } from '../identity/seedStore.js'
+import {
+  createSeedStore,
+  seedStoreDbName,
+  type SeedStore
+} from '../identity/seedStore.js'
 import { createDescriptorManager } from '../storage/descriptorManager.js'
 import {
   clearAppSession,
@@ -339,11 +343,14 @@ export function createAuthStore({
     activateStorageContext(storageContext)
   }
   const sessionStore =
-    seedStore ?? createSeedStore({ dbName: `${dbName}-session` })
+    seedStore ??
+    createSeedStore({ dbName: seedStoreDbName({ dbName, kind: 'session' }) })
   // The anonymous-seed persistence for `local` mode: only a raw 32-byte seed,
   // no session record, in its own IndexedDB so it never collides with the
   // wallet session or a connected replica.
-  const anonStore = createSeedStore({ dbName: `${dbName}-anon` })
+  const anonStore = createSeedStore({
+    dbName: seedStoreDbName({ dbName, kind: 'anon' })
+  })
   // Where every encryption descriptor of this session comes from: minted at an
   // anonymous collection's birth, read from the offline cache, completed with
   // live reads, cached again after the sync bootstrap fetched. The store only
@@ -972,6 +979,8 @@ export function createAuthStore({
     }
     return snapshotWipeTargets({
       dbName,
+      sessionStoreDbName: sessionStore.dbName,
+      anonStoreDbName: anonStore.dbName,
       grade,
       connectedControllerDid: store.getState().controllerDid,
       anonControllerDid,
@@ -1119,7 +1128,7 @@ export function createAuthStore({
         targets: {
           replicaDbNames: [replicaDbName],
           seedStoreDbNames: [],
-          idbNamePrefixes: [],
+          sweepDbName: null,
           storageKeyPrefix: null
         },
         ...(storage && { storage })

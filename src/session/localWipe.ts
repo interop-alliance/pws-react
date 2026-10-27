@@ -21,10 +21,14 @@
  *   database deleted; what it cannot confirm is reported as `unverified` rather
  *   than counted toward an outcome that reads clean.
  *
- * What the prefix sweep reaches beyond the snapshot: anonymous replicas that
- * earlier versions of this library already orphaned, and the replicas of other
- * wallet identities on this browser. Both are this app's own databases under
- * its own `dbName`, and removing them is what clearing data means.
+ * What the sweep reaches beyond the snapshot: anonymous replicas an earlier run
+ * left behind under the `<dbName>-<8 hex>` name (their seed discarded ahead of
+ * the removal), and the replicas of other wallet identities on this browser.
+ * Both are this app's own databases under its own `dbName`, and removing them
+ * is what clearing data means. The sweep matches only the shapes this library
+ * names ({@link isAppDatabaseName}), so an app whose `dbName` extends this one
+ * (`notes-archive` beside `notes`) is not swept along with it. A database under
+ * a shape this library no longer names is out of its reach.
  *
  * What no enumeration here reaches, stated plainly: data already synced to the
  * WAS server (this is a local clear, not an account deletion), forensic
@@ -32,9 +36,12 @@
  * persisted outside this library.
  */
 import { DEFAULT_STORAGE_KEY_PREFIX } from '../config.js'
+import { seedStoreDbName } from '../identity/seedStore.js'
 import {
   LocalStore,
+  REPLICA_HASH_HEX_WIDTH,
   dbNameForController,
+  isReplicaDbName,
   type ReplicaStorage
 } from '../storage/localStore.js'
 import { clearPersistedWriterId } from '../storage/writerId.js'
@@ -55,13 +62,12 @@ export interface WipeTargets {
    */
   seedStoreDbNames: string[]
   /**
-   * The name prefixes the sweep matches: the app's own base `dbName` (the seed
-   * stores) and the RxDB/Dexie mangling of it (each replica collection is its
-   * own IndexedDB database, named `rxdb-dexie-<dbName>-<hash>--<v>--<name>`).
-   * Empty means no sweep: only the named targets and their Dexie sub-databases
-   * are deleted and verified.
+   * The app's base `dbName` the sweep is anchored on: every database name this
+   * library derives from it is deleted (see {@link isAppDatabaseName}). `null`
+   * means no sweep: only the named targets and their Dexie sub-databases are
+   * deleted and verified.
    */
-  idbNamePrefixes: string[]
+  sweepDbName: string | null
   /**
    * The localStorage prefix whose writer id is cleared, or `null` to leave it
    * in place (the logout grade: the user is expected to log back in on this
@@ -111,6 +117,10 @@ export interface LocalWipeReport {
  *
  * @param options {object}
  * @param options.dbName {string}   the app's base database name
+ * @param options.sessionStoreDbName {string}   the session seed store's
+ *   database name (`SeedStore.dbName`, so an injected store is wiped too)
+ * @param options.anonStoreDbName {string}   the anonymous seed store's
+ *   database name
  * @param options.grade {'logout' | 'clear'}
  * @param [options.connectedControllerDid] {string | null}   the wallet-derived
  *   controller DID, when a connected replica is open
@@ -122,12 +132,16 @@ export interface LocalWipeReport {
  */
 export function snapshotWipeTargets({
   dbName,
+  sessionStoreDbName,
+  anonStoreDbName,
   grade,
   connectedControllerDid,
   anonControllerDid,
   storageKeyPrefix = DEFAULT_STORAGE_KEY_PREFIX
 }: {
   dbName: string
+  sessionStoreDbName: string
+  anonStoreDbName: string
   grade: 'logout' | 'clear'
   connectedControllerDid?: string | null
   anonControllerDid?: string | null
@@ -143,11 +157,99 @@ export function snapshotWipeTargets({
       dbNameForController({ dbName, controllerDid })
     ),
     seedStoreDbNames: clearing
-      ? [`${dbName}-session`, `${dbName}-anon`]
-      : [`${dbName}-session`],
-    idbNamePrefixes: clearing ? [`${dbName}-`, `rxdb-dexie-${dbName}-`] : [],
+      ? [sessionStoreDbName, anonStoreDbName]
+      : [sessionStoreDbName],
+    sweepDbName: clearing ? dbName : null,
     storageKeyPrefix: clearing ? storageKeyPrefix : null
   }
+}
+
+// The prefix of the IndexedDB database RxDB's Dexie storage opens per
+// collection (`rxdb-dexie-<replica>--<version>--<collection>`). Replicas open
+// with `multiInstance: false`, so no broadcast-channel store exists beside one.
+const DEXIE_SHELL_PREFIX = 'rxdb-dexie-'
+
+/**
+ * Whether `name` is the Dexie shell of a collection of the replica named
+ * `replicaDbName`.
+ *
+ * @param options {object}
+ * @param options.replicaDbName {string}
+ * @param options.name {string}   the IndexedDB database name to classify
+ * @returns {boolean}
+ */
+function isReplicaShell({
+  replicaDbName,
+  name
+}: {
+  replicaDbName: string
+  name: string
+}): boolean {
+  const prefix = `${DEXIE_SHELL_PREFIX}${replicaDbName}--`
+  return name.startsWith(prefix) && name.length > prefix.length
+}
+
+/**
+ * Whether an IndexedDB database name is one this library derives from the given
+ * base `dbName`: the two seed stores (`seedStoreDbName`), a replica database
+ * (`isReplicaDbName`, the `dbNameForController` form), and the Dexie shells
+ * RxDB opens beside a replica. Matching those exact shapes, through the same
+ * functions that mint them, is what keeps `notes-archive-anon` out of a sweep
+ * for `notes`.
+ *
+ * @param options {object}
+ * @param options.dbName {string}   the app's base database name
+ * @param options.name {string}   the IndexedDB database name to classify
+ * @returns {boolean}
+ */
+function isAppDatabaseName({
+  dbName,
+  name
+}: {
+  dbName: string
+  name: string
+}): boolean {
+  if (
+    name === seedStoreDbName({ dbName, kind: 'session' }) ||
+    name === seedStoreDbName({ dbName, kind: 'anon' }) ||
+    isReplicaDbName({ dbName, name })
+  ) {
+    return true
+  }
+  // A shell's replica name follows the prefix; the replica shape is
+  // fixed-width past `dbName`, so slice it by length rather than by separator
+  // (a `dbName` may itself contain `--`).
+  const replicaDbName = name.slice(
+    DEXIE_SHELL_PREFIX.length,
+    DEXIE_SHELL_PREFIX.length + dbName.length + 1 + REPLICA_HASH_HEX_WIDTH
+  )
+  return (
+    isReplicaDbName({ dbName, name: replicaDbName }) &&
+    isReplicaShell({ replicaDbName, name })
+  )
+}
+
+/**
+ * The predicate deciding which listed database names the sweep deletes and
+ * the verification probe looks for: every named target by exact name, the
+ * Dexie shells RxDB opens beside each replica target, and (when sweeping)
+ * every name derived from the swept `dbName`. Seed stores are raw IndexedDB
+ * databases with no shells, so they are matched by name alone. The shells are
+ * what make RxDB's own removal complete: `RxDatabase.remove()` clears each
+ * collection's table but leaves its IndexedDB database standing.
+ *
+ * @param targets {WipeTargets}
+ * @returns {(name: string) => boolean}
+ */
+function wipeMatcher(targets: WipeTargets): (name: string) => boolean {
+  const { replicaDbNames, seedStoreDbNames, sweepDbName } = targets
+  const named = new Set([...replicaDbNames, ...seedStoreDbNames])
+  return name =>
+    named.has(name) ||
+    replicaDbNames.some(replicaDbName =>
+      isReplicaShell({ replicaDbName, name })
+    ) ||
+    (sweepDbName !== null && isAppDatabaseName({ dbName: sweepDbName, name }))
 }
 
 /**
@@ -260,19 +362,7 @@ export async function executeLocalWipe({
     }
   }
 
-  // What the sweep deletes and the verification probe looks for: anything
-  // under one of the app's prefixes, plus every named target and the Dexie
-  // sub-databases that embed its name. The second half is what makes RxDB's
-  // own removal complete -- `RxDatabase.remove()` clears each collection's
-  // table but leaves its IndexedDB database standing.
-  function matchesApp(name: string): boolean {
-    return (
-      targets.idbNamePrefixes.some(prefix => name.startsWith(prefix)) ||
-      [...targets.replicaDbNames, ...targets.seedStoreDbNames].some(
-        target => name === target || name.includes(target)
-      )
-    )
-  }
+  const matchesApp = wipeMatcher(targets)
 
   const listed = await listDatabaseNames(idb)
   if (listed === null) {

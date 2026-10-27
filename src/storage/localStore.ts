@@ -76,6 +76,13 @@ import type {
 type EntityPayload = { id: string }
 
 /**
+ * The width of the hex hash `dbNameForController` appends. `isReplicaDbName`
+ * and the clear-data sweep read it, so a wipe recognizes exactly what is
+ * minted here.
+ */
+export const REPLICA_HASH_HEX_WIDTH = 8
+
+/**
  * A stable, RxDB-safe database name per controller DID (FNV-1a hex), so two
  * wallet users on one browser never collide on the same local database.
  *
@@ -96,7 +103,33 @@ export function dbNameForController({
     hash ^= controllerDid.charCodeAt(index)
     hash = Math.imul(hash, 0x01000193) >>> 0
   }
-  return `${dbName}-${hash.toString(16).padStart(8, '0')}`
+  return `${dbName}-${hash.toString(16).padStart(REPLICA_HASH_HEX_WIDTH, '0')}`
+}
+
+/**
+ * Whether `name` has the shape `dbNameForController` mints under `dbName`
+ * (`<dbName>-<hex hash>`), for some controller. The clear-data sweep uses it to
+ * reap replicas whose seed is gone, so the hash width is the one minted above.
+ *
+ * @param options {object}
+ * @param options.dbName {string}   the app's base database name
+ * @param options.name {string}   the IndexedDB database name to classify
+ * @returns {boolean}
+ */
+export function isReplicaDbName({
+  dbName,
+  name
+}: {
+  dbName: string
+  name: string
+}): boolean {
+  const prefix = `${dbName}-`
+  const hash = name.slice(prefix.length)
+  return (
+    name.startsWith(prefix) &&
+    hash.length === REPLICA_HASH_HEX_WIDTH &&
+    /^[0-9a-f]+$/.test(hash)
+  )
 }
 
 /**
@@ -1409,10 +1442,14 @@ export class LocalStore {
     storage?: ReplicaStorage
   }): Promise<void> {
     const { removeRxDatabase } = await import('rxdb/plugins/core')
+    // Single-instance, as `init` opens the replica: the default (multi-instance)
+    // removal opens a broadcast channel, which falls back to an IndexedDB
+    // database of its own wherever the native channel is unavailable.
     await removeRxDatabase(
       dbName,
       (storage as RxStorage<unknown, unknown> | undefined) ??
-        (await defaultStorage())
+        (await defaultStorage()),
+      false
     )
   }
 }

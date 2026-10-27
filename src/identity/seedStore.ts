@@ -34,6 +34,11 @@ const DESCRIPTORS_RECORD = 'descriptors'
  */
 export interface SeedStore {
   /**
+   * The IndexedDB database name the store is bound to. A wipe deletes the
+   * store by this name, so an injected store is wiped wherever it lives.
+   */
+  readonly dbName: string
+  /**
    * Persists the 32-byte master seed.
    */
   saveSeed(seed: Uint8Array): Promise<void>
@@ -64,6 +69,27 @@ export interface SeedStore {
    * Wipes the seed, the session record, and the descriptor cache (logout).
    */
   clearSeedStore(): Promise<void>
+}
+
+/**
+ * The database name of one of the two seed stores an auth store opens under
+ * its app's base `dbName`: `<dbName>-session` for the wallet session and
+ * `<dbName>-anon` for the anonymous seed. The clear-data sweep matches on the
+ * same function, so the names it reaps are the names minted here.
+ *
+ * @param options {object}
+ * @param options.dbName {string}   the app's base database name
+ * @param options.kind {'session' | 'anon'}
+ * @returns {string}
+ */
+export function seedStoreDbName({
+  dbName,
+  kind
+}: {
+  dbName: string
+  kind: 'session' | 'anon'
+}): string {
+  return `${dbName}-${kind}`
 }
 
 /**
@@ -113,6 +139,7 @@ export function createSeedStore({
   }
 
   return {
+    dbName,
     async saveSeed(seed: Uint8Array): Promise<void> {
       await withSessionStore('readwrite', store => store.put(seed, SEED_RECORD))
     },

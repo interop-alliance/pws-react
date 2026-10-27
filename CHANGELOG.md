@@ -9,9 +9,23 @@
   wipes anything and leaves the expiry to the caller (`isExpired`).
 - `RestoredAppSession` is renamed `AppSession` (the `persistAppSession` input:
   the record plus the seed).
+- `snapshotWipeTargets` takes `sessionStoreDbName` and `anonStoreDbName`, and
+  `SeedStore` carries the `dbName` it is bound to, so a wipe deletes an injected
+  session store by its own name instead of assuming `<dbName>-session`.
+- `WipeTargets` carries `sweepDbName` in place of `idbNamePrefixes`. The sweep
+  no longer matches a broadcast-channel store: `LocalStore.removeDatabase`
+  removes single-instance, as `init` opens, so RxDB opens no channel beside a
+  replica.
+- `seedStoreDbName` (`src/identity/seedStore.ts`) and `isReplicaDbName` beside
+  `dbNameForController` name the seed-store and replica database shapes once,
+  for the auth store that mints them and the sweep that matches them.
 
 ### Fixed
 
+- The clear-data sweep matches only the database names this library derives from
+  its `dbName` (`<dbName>-session`, `<dbName>-anon`, `<dbName>-<8 hex>`, and the
+  Dexie shells RxDB opens beside a replica), so clearing one app no longer wipes
+  a sibling app on the same origin whose `dbName` extends it.
 - `LocalStore.init` closes the database it opened when `addCollections` refuses
   (a stored schema hash that no longer matches), instead of leaving it open with
   its collections counted toward RxDB's process-wide cap.

@@ -27,6 +27,7 @@ function descriptor(epoch: string): CollectionEncryption {
 function fakeSeedStore(): SeedStore {
   const records: Record<string, unknown> = {}
   return {
+    dbName: 'fake',
     async saveSeed(seed: Uint8Array) {
       records.seed = seed
     },

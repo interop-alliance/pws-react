@@ -51,6 +51,7 @@ const parsed: ParsedGrants = {
 function fakeSeedStore(): SeedStore & { failRead: boolean } {
   const records: Record<string, unknown> = {}
   return {
+    dbName: 'fake',
     failRead: false,
     async saveSeed(seed: Uint8Array) {
       records.seed = seed

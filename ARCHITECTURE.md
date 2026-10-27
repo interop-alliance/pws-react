@@ -192,8 +192,13 @@ sequences.
 - Clear data (`clearLocalData()`): everything this library ever wrote on the
   browser -- both replicas, both seed stores, and the writer id -- leaving the
   browser as it was before first run. On top of the named targets it runs a
-  prefix sweep, which also reaps anonymous replicas that earlier versions of
-  this library orphaned on the same browser.
+  sweep over every name derived from its `dbName` (the seed stores, a replica
+  name, and the Dexie shells RxDB opens beside a replica, matched on those exact
+  shapes so a sibling app whose `dbName` extends this one is left alone), which
+  also reaps anonymous replicas an earlier run left behind under the replica
+  name on the same browser. The seed stores are deleted by the names the
+  `SeedStore` instances carry, so an injected session store is wiped wherever it
+  lives.
 
 The module rests on three rules. Snapshot every target from live state before
 deleting anything: the anonymous DID is re-derived from its seed while that seed

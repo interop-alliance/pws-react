@@ -287,24 +287,78 @@ describe('logout({ wipe: true })', () => {
   })
 })
 
+/**
+ * Creates an empty IndexedDB database under `name`, so a wipe has something
+ * real to delete (or to leave alone).
+ */
+async function createDatabase({
+  idb,
+  name
+}: {
+  idb: IDBFactory
+  name: string
+}): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = idb.open(name, 1)
+    request.onupgradeneeded = () => request.result.createObjectStore('session')
+    request.onsuccess = () => {
+      request.result.close()
+      resolve()
+    }
+    request.onerror = () =>
+      reject(request.error ?? new Error('IndexedDB open failed.'))
+  })
+}
+
 describe('executeLocalWipe', () => {
+  it('sweeps only the names derived from its own dbName', async () => {
+    const idb = new IDBFactory()
+    // Two apps on one origin, one `dbName` extending the other. Each has its
+    // seed stores, an orphaned replica, and a replica collection's Dexie shell.
+    const namesFor = (dbName: string) => [
+      `${dbName}-session`,
+      `${dbName}-anon`,
+      `${dbName}-0123abcd`,
+      `rxdb-dexie-${dbName}-0123abcd--0--_rxdb_internal`,
+      `rxdb-dexie-${dbName}-0123abcd--0--todos`
+    ]
+    // Near misses of the swept shapes, which must be left alone too.
+    const nearMisses = [
+      'notes',
+      'notes-',
+      'notes-0123abcde',
+      'rxdb-dexie-notes-0123abcd'
+    ]
+    const untouched = [...namesFor('notes-archive'), ...nearMisses]
+    for (const name of [...namesFor('notes'), ...untouched]) {
+      await createDatabase({ idb, name })
+    }
+    const targets = snapshotWipeTargets({
+      dbName: 'notes',
+      sessionStoreDbName: 'notes-session',
+      anonStoreDbName: 'notes-anon',
+      grade: 'clear'
+    })
+
+    const report = await executeLocalWipe({ targets, idb })
+
+    expect(report.failed).toEqual([])
+    expect(report.unverified).toEqual([])
+    const remaining = (await idb.databases()).map(entry => entry.name)
+    expect(remaining.sort()).toEqual(untouched.sort())
+  })
+
   it('reports what it could not confirm on an engine without databases()', async () => {
     const dbName = `was-react-${Math.random().toString(36).slice(2)}`
     const idb = new IDBFactory()
     // Give the seed store something real to delete.
-    await new Promise<void>(resolve => {
-      const request = idb.open(`${dbName}-anon`, 1)
-      request.onupgradeneeded = () =>
-        request.result.createObjectStore('session')
-      request.onsuccess = () => {
-        request.result.close()
-        resolve()
-      }
-    })
+    await createDatabase({ idb, name: `${dbName}-anon` })
     const seed = crypto.getRandomValues(new Uint8Array(32))
     const { controllerDid } = await deriveIdentity({ seed })
     const targets = snapshotWipeTargets({
       dbName,
+      sessionStoreDbName: `${dbName}-session`,
+      anonStoreDbName: `${dbName}-anon`,
       grade: 'clear',
       connectedControllerDid: controllerDid,
       storageKeyPrefix: DEFAULT_STORAGE_KEY_PREFIX
