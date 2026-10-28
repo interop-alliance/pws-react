@@ -30,6 +30,29 @@ function flushMicrotasks(): Promise<void> {
   return Promise.resolve()
 }
 
+/**
+ * Yields one macrotask turn, enough for a queued persist to reach the fake.
+ */
+function nextTick(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve: (value: T) => void
+}
+
+/**
+ * A promise with its resolver exposed, for gating a fake persist.
+ */
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(res => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 let context: StorageContext
 
 beforeEach(() => {
@@ -186,34 +209,137 @@ describe('createEntityStore', () => {
 
     await store.getState().insert({ id: 'local-1', text: 'hi' })
 
-    // The insert's `set` fired as soon as the persist resolved -- no microtask
+    // The insert's `set` fired before the persist was awaited -- no microtask
     // flush needed, and the Map holds exactly what was persisted.
     const held = store.getState().byId.get('local-1')
     expect(held).toMatchObject({ id: 'local-1', text: 'hi' })
     expect(inserted).toEqual([['notes', held]])
   })
 
-  it('upsert persists through upsertEntity and sets the doc immediately', async () => {
-    const upserted: Array<[string, LwwNote]> = []
+  it('commits a write before its persist settles, so read-modify-writes compose', async () => {
     const store = createEntityStore<LwwNote>('notes')
+    const started: string[] = []
+    const gates = new Map<string, Deferred<void>>()
     context.attachStore({
-      upsertEntity: async (key: string, doc: LwwNote) => {
-        upserted.push([key, doc])
+      upsertEntity: async (_key: string, doc: LwwNote) => {
+        started.push(doc.text)
+        const gate = deferred<void>()
+        gates.set(doc.text, gate)
+        await gate.promise
       }
     } as unknown as LocalStore)
 
-    await store.getState().upsert({ id: 'solo', text: 'v1' })
-    await store.getState().upsert({ id: 'solo', text: 'v2' })
+    const first = store.getState().upsert({ id: 'n', text: 'one' })
+    // Not awaited: the Map already shows the first write.
+    expect(store.getState().byId.get('n')).toMatchObject({ text: 'one' })
+    const held = store.getState().byId.get('n')!
+    const second = store
+      .getState()
+      .upsert({ ...held, text: `${held.text}+two` })
+    expect(store.getState().byId.get('n')).toMatchObject({ text: 'one+two' })
 
-    expect(store.getState().byId.get('solo')).toMatchObject({
-      id: 'solo',
-      text: 'v2'
-    })
-    expect(store.getState().byId.size).toBe(1)
-    expect(upserted.map(([key, doc]) => [key, doc.text])).toEqual([
-      ['notes', 'v1'],
-      ['notes', 'v2']
-    ])
+    // Persists to one id run in call order: the second does not start until
+    // the first has settled.
+    await nextTick()
+    expect(started).toEqual(['one'])
+    gates.get('one')!.resolve()
+    await first
+    await nextTick()
+    expect(started).toEqual(['one', 'one+two'])
+    gates.get('one+two')!.resolve()
+    await second
+    expect(store.getState().byId.get('n')).toMatchObject({ text: 'one+two' })
+  })
+
+  it('puts the last persisted doc back when a write fails', async () => {
+    const store = createEntityStore<LwwNote>('notes')
+    // The fake rejects by content, so failing and succeeding writes can be
+    // queued together.
+    const persist = async (_key: string, doc: LwwNote) => {
+      if (doc.text.startsWith('lost')) {
+        throw new Error('persist failed')
+      }
+    }
+    context.attachStore({
+      insertEntity: persist,
+      upsertEntity: persist
+    } as unknown as LocalStore)
+
+    await store.getState().upsert({ id: 'n', text: 'kept' })
+    await expect(
+      store.getState().upsert({ id: 'n', text: 'lost' })
+    ).rejects.toThrow('persist failed')
+    expect(store.getState().byId.get('n')).toMatchObject({ text: 'kept' })
+
+    // A new id that fails to persist leaves no entry behind.
+    await expect(
+      store.getState().insert({ id: 'ghost', text: 'lost too' })
+    ).rejects.toThrow('persist failed')
+    expect(store.getState().byId.has('ghost')).toBe(false)
+
+    // A later write queued on top of the failing one stands.
+    const failing = store.getState().upsert({ id: 'n', text: 'lost again' })
+    const later = store.getState().upsert({ id: 'n', text: 'newer' })
+    await expect(failing).rejects.toThrow('persist failed')
+    await later
+    expect(store.getState().byId.get('n')).toMatchObject({ text: 'newer' })
+
+    // Two failures in a row fall back to the last persisted doc, not to the
+    // first failure's never-persisted one.
+    const failingA = store.getState().upsert({ id: 'n', text: 'lost a' })
+    const failingB = store.getState().upsert({ id: 'n', text: 'lost b' })
+    await expect(failingA).rejects.toThrow('persist failed')
+    await expect(failingB).rejects.toThrow('persist failed')
+    expect(store.getState().byId.get('n')).toMatchObject({ text: 'newer' })
+  })
+
+  it('keeps showing a write in flight across a hydrate', async () => {
+    const store = createEntityStore<LwwNote>('notes')
+    const gate = deferred<void>()
+    context.attachStore({
+      upsertEntity: async () => {
+        await gate.promise
+      },
+      // The listing predates both writes: one id it does not know, one it
+      // holds at its pre-write value.
+      listEntities: async () => [
+        { id: 'old', text: 'stale', updatedAt: 'then', writerId: 'w' }
+      ]
+    } as unknown as LocalStore)
+
+    const fresh = store.getState().upsert({ id: 'fresh', text: 'landed' })
+    const old = store.getState().upsert({ id: 'old', text: 'edited' })
+    await store.getState().hydrate()
+    expect(store.getState().byId.get('fresh')).toMatchObject({ text: 'landed' })
+    expect(store.getState().byId.get('old')).toMatchObject({ text: 'edited' })
+
+    gate.resolve()
+    await Promise.all([fresh, old])
+    // Once the queue has drained a hydrate reads the replica as it is.
+    await store.getState().hydrate()
+    expect(store.getState().byId.has('fresh')).toBe(false)
+    expect(store.getState().byId.get('old')).toMatchObject({ text: 'stale' })
+  })
+
+  it('drops a doc once its tombstone persists, and keeps it when that fails', async () => {
+    const store = createEntityStore<LwwNote>('notes')
+    let fail = true
+    context.attachStore({
+      upsertEntity: async () => {},
+      deleteEntity: async () => {
+        if (fail) {
+          throw new Error('delete failed')
+        }
+      }
+    } as unknown as LocalStore)
+
+    await store.getState().upsert({ id: 'n', text: 'stays' })
+    await expect(store.getState().remove('n')).rejects.toThrow('delete failed')
+    expect(store.getState().byId.get('n')).toMatchObject({ text: 'stays' })
+
+    fail = false
+    await store.getState().remove('n')
+    expect(store.getState().byId.has('n')).toBe(false)
   })
 
   it('stamps fresh LWW fields on insert, update and upsert', async () => {

@@ -92,7 +92,10 @@ export interface DocumentApp<T extends object> {
      * Merge a partial patch (or apply an updater function) onto the current
      * document and persist it (the write verb stamps the LWW fields). The write
      * lands in the encrypted local replica first and replicates in the
-     * background when connected.
+     * background when connected. Each call reads the document as the previous
+     * call left it, whether or not that call was awaited, so a burst of
+     * unawaited updates composes in call order; a call whose persist rejects
+     * leaves the document as it was before it.
      */
     update: (patch: Partial<T> | ((prev: T) => T)) => Promise<void>
     /**
@@ -105,7 +108,8 @@ export interface DocumentApp<T extends object> {
      */
     sync: SyncRollup
     /**
-     * Serialize the current document to a downloadable JSON blob.
+     * Serialize the current document to a downloadable JSON blob. An update
+     * issued before the call is included, awaited or not.
      */
     exportFile: () => Promise<Blob>
     /**
@@ -222,7 +226,8 @@ export function defineDocumentApp<T extends object>({
 
   /**
    * Merges the patch (or applies the updater) and persists the result under
-   * the fixed document id; the entity store's `upsert` stamps the LWW fields.
+   * the fixed document id; the entity store's `upsert` stamps the LWW fields
+   * and owns the ordering of unawaited calls.
    *
    * @param patch {Partial<T> | ((prev: T) => T)}
    * @returns {Promise<void>}

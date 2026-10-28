@@ -12,8 +12,9 @@
  * last-write-wins fields themselves through {@link stampLww}, so an app can
  * never degrade conflict resolution by forgetting to.
  *
- * Reactivity note: local writes patch the Map optimistically after the localStore
- * write resolves. Pulled remote changes are applied per-doc by the sync layer
+ * Reactivity note: local writes patch the Map before the localStore write is
+ * awaited (see `writeDoc` for the rules). Pulled remote changes are applied
+ * per-doc by the sync layer
  * through `patch` / `drop` (no whole-collection re-hydrate), keeping multi-device
  * edits and tombstones live without re-hydrate storms. Those per-doc remote
  * patches are coalesced: a pull burst is buffered and flushed on a microtask as a
@@ -22,6 +23,7 @@
  * local writes stay immediate so a single edit is snappy.
  */
 import { create, type UseBoundStore, type StoreApi } from 'zustand'
+import type { LocalStore } from './localStore.js'
 // The verbs resolve the ACTIVE session's context on every call rather than
 // capturing one: an entity store is created at module level, before any
 // session exists, and outlives every session it serves.
@@ -55,9 +57,11 @@ export interface EntityStore<T extends { id: string }> {
    */
   hydrate: () => Promise<void>
   /**
-   * Encrypt+insert a new doc, then add it to the Map. Fresh `updatedAt` /
-   * `writerId` LWW fields are stamped by this verb, overwriting any the caller
-   * supplied; the Map holds exactly what was persisted.
+   * Encrypt+insert a new doc, adding it to the Map before the persist is
+   * awaited, so a read-modify-write issued right after this verb returns sees
+   * it. Fresh `updatedAt` / `writerId` LWW fields are stamped by this verb,
+   * overwriting any the caller supplied; the Map holds exactly what is
+   * persisted, and a persist that rejects puts the last persisted doc back.
    */
   insert: (doc: WritablePayload<T>) => Promise<void>
   /**
@@ -134,7 +138,7 @@ export interface EntityStore<T extends { id: string }> {
 export function createEntityStore<T extends { id: string }>(
   collectionKey: string
 ): UseBoundStore<StoreApi<EntityStore<T>>> {
-  return create<EntityStore<T>>(set => {
+  return create<EntityStore<T>>((set, get) => {
     // The pull path (`patch` / `drop`) can fire once per remote change; an
     // initial device sync of N docs would otherwise clone the byId Map N times
     // and push N separate store updates (O(N^2) copies + N re-renders). Buffer
@@ -206,8 +210,8 @@ export function createEntityStore<T extends { id: string }>(
     }
 
     /**
-     * Drops one doc from the Map, immediately (the same optimistic patch behind
-     * a local `remove`).
+     * Drops one doc from the Map, immediately (the patch behind a local
+     * `remove`, and the rollback of a failed insert).
      */
     function dropDoc(uuid: string): void {
       set(state => {
@@ -217,35 +221,143 @@ export function createEntityStore<T extends { id: string }>(
       })
     }
 
+    /**
+     * The persisted writes in flight, keyed by logical uuid. `tail` is the end
+     * of that id's persist queue: persists to one id run in call order, so two
+     * unawaited upserts on a fresh id cannot both take the replica's insert
+     * path and mint two rows. `latest` is the doc the Map shows for the id
+     * while the queue runs, which a hydrate that lands meanwhile re-applies
+     * (it listed the replica before the write reached it). `confirmed` is the
+     * last doc the replica took, which a failed persist falls back to. An
+     * entry is dropped once its queue drains.
+     */
+    const inFlight = new Map<
+      string,
+      {
+        tail: Promise<void>
+        pending: number
+        latest: T | undefined
+        confirmed: T | undefined
+      }
+    >()
+
+    /**
+     * Queues one persist on the id's chain and returns its entry with the
+     * promise of this persist alone.
+     */
+    function enqueue(
+      id: string,
+      task: (local: LocalStore) => Promise<void>
+    ): {
+      entry: NonNullable<ReturnType<typeof inFlight.get>>
+      run: Promise<void>
+    } {
+      let entry = inFlight.get(id)
+      if (entry === undefined) {
+        const held = get().byId.get(id)
+        entry = {
+          tail: Promise.resolve(),
+          pending: 0,
+          latest: held,
+          confirmed: held
+        }
+        inFlight.set(id, entry)
+      }
+      entry.pending += 1
+      const run = entry.tail.then(async () => task(await awaitStore()))
+      entry.tail = run.then(
+        () => {},
+        () => {}
+      )
+      return { entry, run }
+    }
+
+    /**
+     * Retires one queued persist, dropping the entry when the queue is empty.
+     */
+    function settle(id: string, entry: { pending: number }): void {
+      entry.pending -= 1
+      if (entry.pending === 0) {
+        inFlight.delete(id)
+      }
+    }
+
+    /**
+     * The optimistic write: stamp, commit to the Map, then persist in queue
+     * order. The commit runs before the first await so a read-modify-write
+     * issued right after this verb returns reads this write. A persist that
+     * rejects puts the last persisted doc back, but only while the Map still
+     * shows this write; a later write queued on top of it stands and settles
+     * the Map on its own.
+     */
+    async function writeDoc(
+      doc: WritablePayload<T>,
+      persist: (local: LocalStore, stamped: T) => Promise<void>
+    ): Promise<void> {
+      const stamped = stampLww(doc) as unknown as T
+      const { entry, run } = enqueue(stamped.id, local =>
+        persist(local, stamped)
+      )
+      entry.latest = stamped
+      commitDoc(stamped)
+      try {
+        await run
+        entry.confirmed = stamped
+      } catch (err) {
+        if (entry.latest === stamped) {
+          entry.latest = entry.confirmed
+          if (entry.confirmed === undefined) {
+            dropDoc(stamped.id)
+          } else {
+            commitDoc(entry.confirmed)
+          }
+        }
+        throw err
+      } finally {
+        settle(stamped.id, entry)
+      }
+    }
+
     return {
       byId: new Map<string, T>(),
       hydrate: async () => {
         const docs = await requireStore().listEntities<T>(collectionKey)
-        set({ byId: new Map(docs.map(d => [d.id, d])) })
+        const byId = new Map(docs.map(d => [d.id, d]))
+        // The listing predates the writes still in flight; keep showing them.
+        for (const [id, { latest }] of inFlight) {
+          if (latest === undefined) {
+            byId.delete(id)
+          } else {
+            byId.set(id, latest)
+          }
+        }
+        set({ byId })
       },
-      insert: async doc => {
-        // Stamp once, then persist and commit the SAME object, so the
-        // optimistic Map entry is byte-for-byte what the replica holds.
-        const local = await awaitStore()
-        const stamped = stampLww(doc) as unknown as T
-        await local.insertEntity(collectionKey, stamped)
-        commitDoc(stamped)
-      },
-      update: async doc => {
-        const local = await awaitStore()
-        const stamped = stampLww(doc) as unknown as T
-        await local.updateEntity(collectionKey, stamped)
-        commitDoc(stamped)
-      },
-      upsert: async doc => {
-        const local = await awaitStore()
-        const stamped = stampLww(doc) as unknown as T
-        await local.upsertEntity(collectionKey, stamped)
-        commitDoc(stamped)
-      },
+      insert: doc =>
+        writeDoc(doc, (local, stamped) =>
+          local.insertEntity(collectionKey, stamped)
+        ),
+      update: doc =>
+        writeDoc(doc, (local, stamped) =>
+          local.updateEntity(collectionKey, stamped)
+        ),
+      upsert: doc =>
+        writeDoc(doc, (local, stamped) =>
+          local.upsertEntity(collectionKey, stamped)
+        ),
       remove: async uuid => {
-        const local = await awaitStore()
-        await local.deleteEntity(collectionKey, uuid)
+        // Rides the id's persist queue behind any write still in flight, and
+        // drops the doc once the tombstone is persisted.
+        const { entry, run } = enqueue(uuid, local =>
+          local.deleteEntity(collectionKey, uuid)
+        )
+        try {
+          await run
+          entry.latest = undefined
+          entry.confirmed = undefined
+        } finally {
+          settle(uuid, entry)
+        }
         dropDoc(uuid)
       },
       replaceAll: docs => {

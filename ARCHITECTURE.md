@@ -1163,16 +1163,20 @@ It is a degenerate entity store: one collection holding one logical document
 under a fixed id, with the app's data wrapped as
 `{ id, updatedAt, writerId, data }` so app fields can never collide with the LWW
 fields the sync layer requires -- and stamped by the entity store's `upsert`,
-not by the facade, which passes `{ id, data }` alone. Hydration goes through
-`LocalStore.hydrateSingleton`, which LWW-reconciles the duplicate envelope rows
-two clients can mint for the same logical document, keeping the winner and
-tombstoning the losers. The generated config registers exactly one collection
-and sets `onboarding: 'local-first'`, so `connect()` is plain `login()`: one
-legible line on the wallet consent screen, and the default merge adoption
-carries the local document into the granted collection. Multi-document ("slot")
-variants are not supported yet (they would need a grouped per-id reconciler --
-`hydrateSingleton` reconciles all rows down to one winner), and an app that has
-outgrown one document should move to `createEntityStore`.
+not by the facade, which passes `{ id, data }` alone. `update` reads the held
+document, merges, and upserts; the entity store commits the result to its Map
+before the persist is awaited and queues the persists of one id in call order,
+so a burst of unawaited updates composes and an `exportFile` issued right after
+an update serializes it. Hydration goes through `LocalStore.hydrateSingleton`,
+which LWW-reconciles the duplicate envelope rows two clients can mint for the
+same logical document, keeping the winner and tombstoning the losers. The
+generated config registers exactly one collection and sets
+`onboarding: 'local-first'`, so `connect()` is plain `login()`: one legible line
+on the wallet consent screen, and the default merge adoption carries the local
+document into the granted collection. Multi-document ("slot") variants are not
+supported yet (they would need a grouped per-id reconciler -- `hydrateSingleton`
+reconciles all rows down to one winner), and an app that has outgrown one
+document should move to `createEntityStore`.
 
 ## The MUI dialogs
 

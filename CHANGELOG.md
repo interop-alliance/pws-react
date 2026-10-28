@@ -22,6 +22,14 @@
 
 ### Fixed
 
+- The entity store's write verbs (`insert`, `update`, `upsert`) commit to the
+  Map before the persist is awaited, and the persists of one id (`remove`
+  included) run in call order, so a read-modify-write issued before the previous
+  write has persisted merges onto what that one wrote instead of onto the
+  pre-write value and dropping it, and two unawaited upserts of a new id no
+  longer mint two rows. A persist that rejects puts the last persisted doc back,
+  and a hydrate that lands mid-write keeps showing the write.
+  `defineDocumentApp`'s `update` and `exportFile` inherit this.
 - The clear-data sweep matches only the database names this library derives from
   its `dbName` (`<dbName>-session`, `<dbName>-anon`, `<dbName>-<8 hex>`, and the
   Dexie shells RxDB opens beside a replica), so clearing one app no longer wipes

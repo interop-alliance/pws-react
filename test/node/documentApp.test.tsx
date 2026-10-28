@@ -210,6 +210,85 @@ describe('useAppDocument', () => {
     expect(fake.rows.get('main')?.data.score).toBe(8)
   })
 
+  it('composes unawaited updates in call order', async () => {
+    const { app, store, fake } = localApp()
+    const { result } = renderHook(() => app.useAppDocument(), {
+      wrapper: wrapperFor(store)
+    })
+    // Neither write is awaited before the next is issued: the second must
+    // merge onto what the first wrote, not onto the pre-write value.
+    const first = result.current.update({ score: 1 })
+    const second = result.current.update({ playerName: 'racer' })
+    const third = result.current.update(prev => ({
+      ...prev,
+      score: prev.score + 10
+    }))
+    // An export issued in the same burst already carries the three updates.
+    const exported = await result.current.exportFile().then(readBlobText)
+    expect((JSON.parse(exported) as { document: SaveFile }).document).toEqual({
+      score: 11,
+      playerName: 'racer'
+    })
+    await Promise.all([first, second, third])
+
+    expect(fake.rows.get('main')?.data).toEqual({
+      score: 11,
+      playerName: 'racer'
+    })
+    await waitFor(() =>
+      expect(result.current.doc).toEqual({ score: 11, playerName: 'racer' })
+    )
+  })
+
+  it('rolls back an update the store rejects, then takes updates and imports again', async () => {
+    const { app, store, fake } = localApp()
+    const { result } = renderHook(() => app.useAppDocument(), {
+      wrapper: wrapperFor(store)
+    })
+    await result.current.update({ score: 3 })
+    const persist = fake.upsertEntity
+    fake.upsertEntity = async () => {
+      throw new Error('replica closed')
+    }
+    await expect(result.current.update({ score: 4 })).rejects.toThrow(
+      'replica closed'
+    )
+    await waitFor(() => expect(result.current.doc?.score).toBe(3))
+
+    fake.upsertEntity = persist
+    const next = result.current.update({ playerName: 'back' })
+    const imported = result.current.importFile(
+      fileOf(
+        JSON.stringify({
+          format: DOCUMENT_EXPORT_FORMAT,
+          document: { score: 7, playerName: 'imported' }
+        })
+      )
+    )
+    await Promise.all([next, imported])
+    expect(fake.rows.get('main')?.data).toEqual({
+      score: 7,
+      playerName: 'imported'
+    })
+  })
+
+  it('keeps updating after a rejected update', async () => {
+    const { app, store, fake } = localApp()
+    const { result } = renderHook(() => app.useAppDocument(), {
+      wrapper: wrapperFor(store)
+    })
+    const failing = result.current.update(() => {
+      throw new Error('bad updater')
+    })
+    const next = result.current.update({ score: 5 })
+    await expect(failing).rejects.toThrow('bad updater')
+    await next
+    expect(fake.rows.get('main')?.data).toEqual({
+      score: 5,
+      playerName: 'anonymous'
+    })
+  })
+
   it('round-trips the document through exportFile / importFile', async () => {
     const { app, store } = localApp()
     const { result } = renderHook(() => app.useAppDocument(), {
