@@ -571,8 +571,7 @@ export function createAuthStore({
       session: {
         seed,
         controllerDid: identity.controllerDid,
-        baseUrl: parsed.baseUrl,
-        spaceId: parsed.spaceId,
+        spaceUrl: parsed.spaceUrl,
         grants,
         expires
       },
@@ -1488,24 +1487,21 @@ export function createAuthStore({
           const checked = await requestGrants({ identity, config: loginConfig })
           // Continuity check: `parseGrants` only asserts the returned set is
           // INTERNALLY consistent. Without this comparison, a reconnect
-          // returning internally-consistent grants for a DIFFERENT server or
-          // space would silently re-point the whole encrypted replica (whose
+          // returning internally-consistent grants for a DIFFERENT Space
+          // would silently re-point the whole encrypted replica (whose
           // database name derives from the controller DID alone) at a new
           // storage location the user never chose. Refuse instead; switching
           // storage is a logout + fresh login, an explicit user action.
           if (
             record !== null &&
             checked.parsed !== undefined &&
-            (checked.parsed.baseUrl !== record.baseUrl ||
-              checked.parsed.spaceId !== record.spaceId)
+            checked.parsed.spaceUrl !== record.spaceUrl
           ) {
             throw new Error(
-              `The renewed grants point at a different storage location ` +
-                `("${checked.parsed.baseUrl}", space ` +
-                `"${checked.parsed.spaceId}") than this session's ` +
-                `("${record.baseUrl}", space "${record.spaceId}"). ` +
-                `Refusing to re-point the session; log out and log in again ` +
-                `to switch storage.`
+              `The renewed grants point at a different Space ` +
+                `("${checked.parsed.spaceUrl}") than this session's ` +
+                `("${record.spaceUrl}"). Refusing to re-point the session; ` +
+                `log out and log in again to switch storage.`
             )
           }
           // The popup await above is off the lifecycle chain, so a `logout`,

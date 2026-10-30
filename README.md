@@ -402,7 +402,7 @@ the provisioner for it:
 
 ```ts
 await provisionDevGrants({
-  serverUrl: 'http://localhost:3002/spaces/',
+  baseServerUrl: 'http://localhost:3002/',
   seed: mySeedBytes,
   collections: [{ id: 'notes', visibility: 'private', blindedIndex: true }]
 })
@@ -672,7 +672,7 @@ CHAPI wallet in the loop. It is Node-only (uses `node:fs`).
 import { provisionDevGrants } from '@interop/was-react/dev'
 
 const result = await provisionDevGrants({
-  serverUrl: 'http://localhost:3002/spaces/',
+  baseServerUrl: 'http://localhost:3002/',
   seed: mySeedBytes,
   collections: ['notes'],
   outFile: './public/dev-grants.local.json'

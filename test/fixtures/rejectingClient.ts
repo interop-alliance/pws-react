@@ -27,6 +27,6 @@ export function rejectingClient(status: number): WasClient {
   })
   return {
     request: reject,
-    space: () => ({ collection: () => ({ resourceChanges: rejectingWalk }) })
+    spaceAt: () => ({ collection: () => ({ resourceChanges: rejectingWalk }) })
   } as unknown as WasClient
 }

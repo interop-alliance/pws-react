@@ -33,8 +33,7 @@ function sessionFixture(expires: string): AppSession {
   return {
     seed: crypto.getRandomValues(new Uint8Array(32)),
     controllerDid: 'did:key:z6MkTest',
-    baseUrl: 'http://localhost:3999',
-    spaceId: 'space-1',
+    spaceUrl: 'http://localhost:3999/space/space-1/',
     grants: [
       { id: 'urn:zcap:1', invocationTarget: 'http://x/space/space-1/a' }
     ] as unknown as IZcap[],
@@ -80,8 +79,7 @@ describe('persist/peek', () => {
     expect(seed).toEqual(session.seed)
     expect(record).not.toBeNull()
     expect(record!.controllerDid).toBe(session.controllerDid)
-    expect(record!.baseUrl).toBe(session.baseUrl)
-    expect(record!.spaceId).toBe(session.spaceId)
+    expect(record!.spaceUrl).toBe(session.spaceUrl)
     expect(record!.grants).toEqual(session.grants)
     expect(record!.expires).toBe(session.expires)
   })

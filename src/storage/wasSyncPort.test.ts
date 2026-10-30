@@ -22,7 +22,7 @@ import {
 function makePort(status: number) {
   return createWasSyncPort({
     was: rejectingClient(status),
-    spaceId: 'space-1',
+    spaceUrl: 'https://was.example/space/space-1/',
     collectionId: 'notes'
   })
 }

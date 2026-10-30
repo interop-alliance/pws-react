@@ -31,8 +31,7 @@ const collections: WasCollectionConfig[] = [
 ]
 
 const parsed: ParsedGrants = {
-  baseUrl: 'https://was.example',
-  spaceId: 'space-1',
+  spaceUrl: 'https://was.example/space/space-1/',
   byCollectionId: {
     notes: { id: 'urn:zcap:notes' } as unknown as IZcap,
     tasks: { id: 'urn:zcap:tasks' } as unknown as IZcap

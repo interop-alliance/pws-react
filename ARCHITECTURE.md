@@ -15,9 +15,9 @@ agent-facing rules (toolchain, tests, repo-specific dos and don'ts) see
   hook, and the sync/expiry tuning. `validateCollections` and
   `validateSharedCollections` are the fail-closed registry checks the storage
   layer runs before any replica opens.
-- `src/grants.ts` -- parses granted zcaps into server URL / space id /
-  per-collection routing (`ParsedGrants`), over was-client's own
-  `parseSpaceTarget`.
+- `src/grants.ts` -- parses granted zcaps into the one Space URL they are rooted
+  in and the per-collection routing (`ParsedGrants`), over was-client's own
+  `spaceUrlOf` and `parseSpaceTarget`.
 - `src/identity/` -- seed-derived agents (`deriveIdentity`, which enforces the
   32-byte seed rule and yields the identity key-agreement key every encrypted
   collection is read with), the app-key credential (issue/locate/parse), seed
@@ -520,13 +520,25 @@ reach the routing table through `parseGrants`.
 
 That check is structural. `controller` must equal the app's own DID,
 `invocationTarget` must name exactly one collection, and `expires` must be in
-the future. Nothing about the delegation chain leading to the grant is
-inspected: chain depth, the parent capability, and the delegator's DID form are
-deliberately left unchecked. A wallet may root a grant at the Space root or at
-an intermediate delegation. Both are valid here. A standing-credential account's
-grants, for instance, chain through a generation delegation: the chain is depth
-3, and the delegator is a key that never appears in the account document.
-Validity at invocation is the storage server's decision, not this library's.
+the future. The grant's Space is read off its delegation chain's root: the chain
+of a Space-rooted capability starts at the Space's root capability, whose id
+encodes the Space URL (was-client's `spaceUrlOf`), and the target is classified
+beneath that URL. Every grant in a set must root in the same Space. The Space
+URL the root names is taken as given, in whatever form. The spec's received-URL
+rule makes a Space URL a client receives authoritative, and a single fixed Space
+may live at any URL (an origin root, or a path with no base server URL above
+it), so no layout shape is checked here. Whether a chain roots exactly at the
+Space, rather than at a Collection beneath it, is the server's to decide at
+invocation; was-client's `spaceUrlOf` cannot tell the two apart and does not
+try. A chain that roots in no Space at all surfaces as this module's own grant
+error, with was-client's `ValidationError` as `cause`. The Space is the only
+thing read from the chain. Its links are not inspected: chain depth, the parent
+capability, and the delegator's DID form are deliberately left unchecked. A
+wallet may parent a grant on the Space root or on an intermediate delegation.
+Both are valid here. A standing-credential account's grants, for instance, chain
+through a generation delegation: the chain is depth 3, and the delegator is a
+key that never appears in the account document. Validity at invocation is the
+storage server's decision, not this library's.
 
 One consequence follows directly: the connected account may have no durable
 wallet clients at all. A grant can stop verifying before its stated `expires`,
@@ -711,14 +723,14 @@ descriptor and builds a cipher from it; an audience is plaintext. A shared
 collection's fast path walks the POST form of the `changes` feed, which a GET
 and HEAD grant does not reach; the audience reader reads the read-only GET form.
 And a shared collection is resolved through the session's `WasRemoteStore`,
-which holds the one server URL and Space the app's own grants name; an audience
-lives in another owner's Space, possibly on another host, so
+which holds the one Space the app's own grants name; an audience lives in
+another owner's Space, possibly on another host, so
 `AudienceReader.open({ zcap, signer })` takes the zcap directly and builds its
-client from the zcap's own `invocationTarget` (was-client's
-`parseAbsoluteSpaceTarget` reads the base URL off it, everything before the
-`space` segment, so a WAS mounted under a sub-path works). The zcap arrives from
-the subscription agent's own API, not in a wallet presentation, which is why
-`parseGrants` and `verifyResponse` know nothing about it.
+client on the Space the zcap's chain is rooted in (`spaceUrlOf`, through
+`WasClient.forSpace`, which holds a Space URL and nothing above it, so a Space
+served under any mount works). The zcap arrives from the subscription agent's
+own API, not in a wallet presentation, which is why `parseGrants` and
+`verifyResponse` know nothing about it.
 
 `pull()` follows the feed from the reader's checkpoint to the end, through
 was-client's `resourceChanges` walk, which drops every entry whose `kind` is not
@@ -748,15 +760,17 @@ its checkpoint (on a cut mid-walk, the last fully read page's, beside the
 changes of those pages), answers an empty pull without a request while paused,
 and resumes from the checkpoint once `replaceCapability({ zcap })` hands it a
 replacement for the same target. A zcap for another target is refused, since the
-checkpoint belongs to this collection alone, and so is one that leaves `GET` out
-of its `allowedAction`, which could only pause the reader again. A replacement
-is accepted on a live reader too (a renewal ahead of expiry); every replacement
-bumps a generation, and a denial raised by a request that left under the
-previous zcap pauses nothing, so a renewal racing an in-flight pull cannot leave
-the reader paused with no further zcap coming. Such a stale denial still cuts
-the walk short, so the pull it ends is reported as partial: `snapshot` is
-`false` even on a replay or a listing read, since only a read that ran to its
-end is a full one.
+checkpoint belongs to this collection alone, and so is one whose chain roots in
+another Space, since the client is built on the Space the chain names, and one
+that leaves `GET` out of its `allowedAction`, which could only pause the reader
+again. Every check runs before the reader changes, so a refused replacement
+leaves it as it was. A replacement is accepted on a live reader too (a renewal
+ahead of expiry); every replacement bumps a generation, and a denial raised by a
+request that left under the previous zcap pauses nothing, so a renewal racing an
+in-flight pull cannot leave the reader paused with no further zcap coming. Such
+a stale denial still cuts the walk short, so the pull it ends is reported as
+partial: `snapshot` is `false` even on a replay or a listing read, since only a
+read that ran to its end is a full one.
 
 On the wire a denial is a 401 or 403, or the masked 404 WAS answers an
 unauthorized caller with, named `capability-revoked` or `capability-expired`
@@ -863,7 +877,9 @@ paths unchanged.
 
 `startWasSync` (`src/storage/wasSync.ts`) is the replication bootstrap: given
 the parsed grant set and the invoking `ZcapClient` it builds the delegated
-`WasRemoteStore`. A collection's `encryption` descriptor, its public
+`WasRemoteStore`, whose client is `WasClient.forSpace` over the grants' Space
+URL (a grants-only app holds no base server URL and needs none of the
+id-addressed operations). A collection's `encryption` descriptor, its public
 `plaintext.indexes` declaration, and its encrypted `custom` envelope (where a
 private collection's blinded-index schema lives) are three members of one
 Collection Metadata object, served at `/space/{s}/{c}/meta` under one
@@ -969,20 +985,21 @@ reader cannot tell that from an honest point-state descriptor.
 
 The owner's controller view is resolved by `resolveSpaceOwner`
 (`src/identity/spaceOwner.ts`), once per connected activation. A requester holds
-nothing that names the Space owner: the grant chain's root is an opaque URN, and
-the Space Description needs a Space-scoped capability App Connect never
-delegates. What it can reach is the account log the owner publishes
-world-readable at `/space/{spaceId}/id/did.jsonl`. That log is self-certifying.
-The DID it resolves to encodes the host and path it is published under, so the
-owner of a Space is the DID whose log is published in that Space and whose
-identifier (`getFileUrl`) maps back to that URL. A log published for another
-location and served there fails that check; a tampered log fails resolution. The
-fetch, the resolution, and the location check are wallet-core's
-`discoverAccountLog`, the reader its own ceremonies verify an account log with
-(`verifyAccountLog` is that reader plus the expected-DID check), so was-react
-carries no copy of the body; `resolveSpaceOwner` only names the absent-log case
-after the Space asked about. The resolved `{ did, log }` becomes the
-`webvhResourceLogController` every collection-log read is verified against.
+nothing that names the Space owner: the grant chain's root names the Space URL
+and nothing more, and the Space Description needs a Space-scoped capability App
+Connect never delegates. What it can reach is the account log the owner
+publishes world-readable at `{spaceUrl}id/did.jsonl`. That log is
+self-certifying. The DID it resolves to encodes the host and path it is
+published under, so the owner of a Space is the DID whose log is published in
+that Space and whose identifier (`getFileUrl`) maps back to that URL. A log
+published for another location and served there fails that check; a tampered log
+fails resolution. The fetch, the resolution, and the location check are
+wallet-core's `discoverAccountLog`, the reader its own ceremonies verify an
+account log with (`verifyAccountLog` is that reader plus the expected-DID
+check), so was-react carries no copy of the body; `resolveSpaceOwner` only names
+the absent-log case after the Space asked about. The resolved `{ did, log }`
+becomes the `webvhResourceLogController` every collection-log read is verified
+against.
 
 Acquisition is written once, as `acquireGovernedDescriptor`
 (`src/storage/governedDescriptors.ts`): was-client's `acquireDescriptor` under

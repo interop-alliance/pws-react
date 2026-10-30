@@ -28,8 +28,7 @@ vi.mock('@interop/wallet-core/descriptors', async importOriginal => {
 vi.mock('../identity/spaceOwner.js', () => ({ resolveSpaceOwner: vi.fn() }))
 
 const parsed: ParsedGrants = {
-  baseUrl: 'https://was.example',
-  spaceId: 'space-1',
+  spaceUrl: 'https://was.example/space/space-1/',
   byCollectionId: {
     'microblog-posts': { id: 'urn:zcap:pub' } as unknown as IZcap,
     notes: { id: 'urn:zcap:priv' } as unknown as IZcap
@@ -160,7 +159,7 @@ function fakeCollectionHandle(
   }
 ) {
   const calls: {
-    spaceId?: string
+    spaceUrl?: string
     collectionId?: string
     capability?: unknown
     find: Array<Record<string, unknown>>
@@ -185,8 +184,8 @@ function fakeCollectionHandle(
     }
   }
   const was = {
-    space: (spaceId: string) => {
-      calls.spaceId = spaceId
+    spaceAt: (spaceUrl: string) => {
+      calls.spaceUrl = spaceUrl
       return {
         collection: (
           collectionId: string,
@@ -713,7 +712,7 @@ describe('WasRemoteStore.queryCollectionByEquality (blinded)', () => {
       hasMore: true,
       cursor: 'next-page'
     })
-    expect(calls.spaceId).toBe('space-1')
+    expect(calls.spaceUrl).toBe('https://was.example/space/space-1/')
     expect(calls.collectionId).toBe('notes')
     expect(calls.capability).toEqual({ id: 'urn:zcap:priv' })
     // Attribute names are rooted at the EDV document's `content`.

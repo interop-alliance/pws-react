@@ -32,7 +32,7 @@ import type { WasSyncBasePort } from '@interop/was-sync'
  *
  * @param options {object}
  * @param options.was {WasClient}       the session client (holds the signer)
- * @param options.spaceId {string}
+ * @param options.spaceUrl {string}   the remote Space's absolute URL
  * @param options.collectionId {string}   the WAS collection id (e.g. `public-credentials`)
  * @param [options.capability] {IZcap}   the delegated session capability for
  *   this collection (a restored `delegated` tier session); absent in the full
@@ -41,12 +41,12 @@ import type { WasSyncBasePort } from '@interop/was-sync'
  */
 export function createWasSyncPort({
   was,
-  spaceId,
+  spaceUrl,
   collectionId,
   capability
 }: {
   was: WasClient
-  spaceId: string
+  spaceUrl: string
   collectionId: string
   capability?: IZcap
 }): WasSyncBasePort {
@@ -54,7 +54,7 @@ export function createWasSyncPort({
   // aliases the wire types from it), so a divergence fails to compile here.
   return createClientSyncPort({
     was,
-    spaceId,
+    spaceUrl,
     collectionId,
     ...(capability !== undefined && { capability }),
     mapAuthErrors: true

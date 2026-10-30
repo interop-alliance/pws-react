@@ -50,6 +50,9 @@ import {
 } from '../../src/storage/localStore.js'
 import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
 
+const SPACE_URL = 'http://localhost:3999/space/space-1/'
+import { rootCapabilityId } from '@interop/was-client/paths'
+
 // Inert replication: the lifecycle logic runs without any network machinery.
 vi.mock('../../src/storage/wasSync.js', () => ({
   startWasSync: vi.fn(async () => ({})),
@@ -243,12 +246,12 @@ describe('serialized boot/destroy lifecycle', () => {
       session: {
         seed,
         controllerDid: identity.controllerDid,
-        baseUrl: 'http://localhost:3999',
-        spaceId: 'space-1',
+        spaceUrl: SPACE_URL,
         grants: [
           {
             id: 'urn:zcap:notes',
-            invocationTarget: 'http://localhost:3999/space/space-1/notes'
+            parentCapability: rootCapabilityId(SPACE_URL),
+            invocationTarget: `${SPACE_URL}notes`
           }
         ] as unknown as IZcap[],
         // Well beyond the 1h near-expiry warning, so the watch never fires.

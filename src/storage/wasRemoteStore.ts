@@ -5,9 +5,9 @@
  * WasRemoteStore (delegated-only): the view of the user's WAS Space held by the
  * requester (an app, service, or agent), stripped to the delegated model --
  * this app NEVER provisions the Space, never
- * derives the spaceId, and never touches the `id` collection or DID publishing.
- * It receives a set of wallet-delegated zcaps, reads the server URL + space id
- * straight out of their `invocationTarget`s ({@link parseGrants}), and holds:
+ * holds a server of its own, and never touches the `id` collection or DID
+ * publishing. It receives a set of wallet-delegated zcaps, reads the Space URL
+ * off their delegation chain's root ({@link parseGrants}), and holds:
  *
  * - a `WasClient` wrapping the app's own `ZcapClient` (its invocation signer is
  *   the seed-derived controller the grants were delegated to);
@@ -58,10 +58,9 @@ import { createEdvEncryption } from '@interop/was-client/edv'
 import type { EncryptionDescriptorSource } from '@interop/was-client/edv'
 import { resourceLogStore } from '@interop/was-client/log'
 import {
-  collectionPath,
-  resourcePath,
-  spacesUrl,
-  toUrl
+  collectionUrl,
+  resourceUrl,
+  spaceIdOfUrl
 } from '@interop/was-client/paths'
 import { errorStatus, errorMessage } from '@interop/was-client/sync'
 import { logGovernedDescriptorSource } from '@interop/wallet-core/descriptors'
@@ -235,7 +234,10 @@ function declarationFailure(
 
 export class WasRemoteStore {
   public readonly was: WasClient
-  public readonly spaceId: string
+  /**
+   * The Space every grant is rooted in, in canonical form.
+   */
+  public readonly spaceUrl: string
   readonly #byCollectionId: Record<string, IZcap>
   // Per WAS collection id: the effective visibility + declared equality
   // indexes (the registry guarantees one declaration per id).
@@ -262,7 +264,7 @@ export class WasRemoteStore {
     trust: SpaceTrust
   }) {
     this.was = was
-    this.spaceId = parsed.spaceId
+    this.spaceUrl = parsed.spaceUrl
     this.#byCollectionId = parsed.byCollectionId
     this.#configById = configById
     this.#hasIdentityKeys = hasIdentityKeys
@@ -316,8 +318,10 @@ export class WasRemoteStore {
     }
     trust?: SpaceTrust
   }): WasRemoteStore {
-    const was = new WasClient({
-      serverUrl: spacesUrl({ baseUrl: parsed.baseUrl }),
+    // A grants-only app holds a Space URL and nothing above it: `forSpace`
+    // opens the client on that URL alone, with no base server URL to assume.
+    const was = WasClient.forSpace({
+      spaceUrl: parsed.spaceUrl,
       zcapClient,
       encryption: createEdvEncryption({
         resolveKeys: async () => keys ?? null
@@ -363,7 +367,9 @@ export class WasRemoteStore {
    * @returns {Collection}
    */
   #collection(collectionId: string, capability: IZcap): Collection {
-    return this.was.space(this.spaceId).collection(collectionId, { capability })
+    return this.was
+      .spaceAt(this.spaceUrl)
+      .collection(collectionId, { capability })
   }
 
   /**
@@ -403,7 +409,8 @@ export class WasRemoteStore {
       },
       resolveController: () => this.#trust.owner(),
       pinStore: this.#trust.pinStore,
-      spaceId: this.spaceId
+      // wallet-core keys its pin slots by Space id.
+      spaceId: spaceIdOfUrl(this.spaceUrl)
     })
     return this.#descriptorSource
   }
@@ -769,7 +776,9 @@ export class WasRemoteStore {
     // trailing slash), the same URL was-client's own listing walks.
     const response = await this.was.request({
       capability,
-      path: `${collectionPath(this.spaceId, collectionId)}?${params.join('&')}`,
+      url:
+        `${collectionUrl({ spaceUrl: this.spaceUrl, collectionId })}?` +
+        params.join('&'),
       method: 'GET'
     })
     const page = response.data as Partial<EqualityQueryPage> | undefined
@@ -829,9 +838,10 @@ export class WasRemoteStore {
         `No delegated capability covers collection "${collectionId}".`
       )
     }
-    return toUrl({
-      baseUrl: this.was.baseUrl,
-      path: resourcePath(this.spaceId, collectionId, id)
+    return resourceUrl({
+      spaceUrl: this.spaceUrl,
+      collectionId,
+      resourceId: id
     })
   }
 

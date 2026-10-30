@@ -44,7 +44,10 @@ import {
   requireWriterId
 } from '../../src/storage/storageManager.js'
 import { DEFAULT_STORAGE_KEY_PREFIX } from '../../src/config.js'
+import { rootCapabilityId } from '@interop/was-client/paths'
 import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
+
+const SPACE_URL = 'http://localhost:3999/space/space-1/'
 
 // Inert replication: the wipe logic runs without any network machinery, and a
 // public collection needs no descriptor read.
@@ -106,7 +109,8 @@ function noteGrants(): IZcap[] {
   return [
     {
       id: 'urn:zcap:notes',
-      invocationTarget: 'http://localhost:3999/space/space-1/notes'
+      parentCapability: rootCapabilityId(SPACE_URL),
+      invocationTarget: `${SPACE_URL}notes`
     }
   ] as unknown as IZcap[]
 }

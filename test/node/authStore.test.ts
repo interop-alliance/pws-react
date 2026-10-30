@@ -34,6 +34,7 @@ import {
   type SeedStore
 } from '../../src/identity/seedStore.js'
 import { WasServerError, type CollectionEncryption } from '@interop/was-client'
+import { rootCapabilityId } from '@interop/was-client/paths'
 import {
   deriveIdentity,
   type IdentityAgents
@@ -60,6 +61,8 @@ import {
 import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../../src/log.js'
+
+const SPACE_URL = 'http://localhost:3999/space/space-1/'
 
 // Inert replication: the machine's activate / persist / teardown logic runs
 // without opening any network or `window`-backed replication machinery. The
@@ -179,7 +182,8 @@ function noteGrants(): IZcap[] {
   return [
     {
       id: 'urn:zcap:notes',
-      invocationTarget: 'http://localhost:3999/space/space-1/notes'
+      parentCapability: rootCapabilityId(SPACE_URL),
+      invocationTarget: `${SPACE_URL}notes`
     }
   ] as unknown as IZcap[]
 }
@@ -358,8 +362,7 @@ async function persistSession({
     session: {
       seed,
       controllerDid: identity.controllerDid,
-      baseUrl: 'http://localhost:3999',
-      spaceId: 'space-1',
+      spaceUrl: SPACE_URL,
       grants,
       expires
     },

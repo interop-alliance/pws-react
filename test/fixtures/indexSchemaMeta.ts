@@ -51,7 +51,7 @@ export async function encodeIndexSchemaMeta({
 }): Promise<unknown> {
   const provider = createEdvEncryption({ resolveKeys: async () => keys })
   const codec = await provider.codecFor({
-    spaceId: 'space-1',
+    spaceUrl: 'https://was.example/space/space-1/',
     collectionId,
     scheme: 'edv',
     encryption

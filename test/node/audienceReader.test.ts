@@ -32,10 +32,9 @@ import {
   type IZcap
 } from '@interop/was-client'
 import {
-  collectionPath,
+  collectionUrl,
   rootCapability,
-  spacePath,
-  toUrl
+  rootCapabilityId
 } from '@interop/was-client/paths'
 import { CapabilityAgent } from '@interop/capability-agent'
 import { captureLogger } from '@interop/logger'
@@ -60,7 +59,7 @@ let appServer: TestServer | undefined
 let appServerUrl: string
 let owner: WasClient
 let ownerDid: string
-let spaceId: string
+let spaceUrl: string
 let signer: ISigner
 let subscriberDid: string
 let audienceCount = 0
@@ -88,14 +87,14 @@ beforeAll(async () => {
   })
   ownerDid = ownerAgent.id
   owner = WasClient.fromSigner({
-    serverUrl: `${audienceServer.serverUrl}/spaces/`,
+    baseServerUrl: audienceServer.serverUrl,
     signer: ownerAgent.getSigner()
   })
   const space = await owner.createSpace({
     name: 'Audience Space',
     controller: ownerDid
   })
-  spaceId = space.id
+  spaceUrl = space.url
   const subscriber = await deriveIdentity({ seed: SUBSCRIBER_SEED })
   signer = subscriber.keyAgent.getSigner()
   subscriberDid = subscriber.controllerDid
@@ -122,17 +121,13 @@ async function provisionAudience(): Promise<{
   target: string
   grant: () => Promise<IDelegatedZcap>
 }> {
-  const serverUrl = audienceServer!.serverUrl
   const collectionId = `audience-${audienceCount++}`
   const collection = await owner
-    .space(spaceId)
+    .spaceAt(spaceUrl)
     .createCollection({ id: collectionId, name: collectionId })
-  const target = toUrl({
-    baseUrl: serverUrl,
-    path: collectionPath(spaceId, collectionId)
-  })
+  const target = collectionUrl({ spaceUrl, collectionId })
   const spaceRoot = rootCapability({
-    target: toUrl({ baseUrl: serverUrl, path: spacePath(spaceId) }),
+    target: spaceUrl,
     controller: ownerDid
   })
   const grant = () =>
@@ -198,15 +193,16 @@ async function withFetchProbe<T>(
 
 describe('AudienceReader.open', () => {
   it('refuses a zcap whose target is not a collection', async () => {
-    const serverUrl = audienceServer!.serverUrl
     const spaceZcap = {
-      invocationTarget: toUrl({ baseUrl: serverUrl, path: spacePath(spaceId) })
+      parentCapability: rootCapabilityId(spaceUrl),
+      invocationTarget: spaceUrl
     } as IZcap
     expect(() => AudienceReader.open({ zcap: spaceZcap, signer })).toThrow(
       /must name a collection/
     )
     const resourceZcap = {
-      invocationTarget: `${toUrl({ baseUrl: serverUrl, path: collectionPath(spaceId, 'c') })}r`
+      parentCapability: rootCapabilityId(spaceUrl),
+      invocationTarget: `${collectionUrl({ spaceUrl, collectionId: 'c' })}r`
     } as IZcap
     expect(() => AudienceReader.open({ zcap: resourceZcap, signer })).toThrow(
       /must name a collection/
@@ -215,7 +211,7 @@ describe('AudienceReader.open', () => {
 
   it('reads a target on a host other than the one the app is granted', async () => {
     const provisioned = await provisionDevGrants({
-      serverUrl: `${appServerUrl}/spaces/`,
+      baseServerUrl: appServerUrl,
       seed: APP_SEED,
       collections: [{ id: 'posts', visibility: 'public' }]
     })
@@ -223,8 +219,8 @@ describe('AudienceReader.open', () => {
     const { grant, collection } = await provisionAudience()
     await collection.put('p1', { postId: 'post-1', body: 'hello' })
     const reader = AudienceReader.open({ zcap: await grant(), signer })
-    expect(reader.serverUrl).toBe(`${audienceServer!.serverUrl}/spaces/`)
-    expect(reader.serverUrl).not.toBe(`${appGrants.baseUrl}/spaces/`)
+    expect(reader.spaceUrl).toBe(spaceUrl)
+    expect(reader.spaceUrl).not.toBe(appGrants.spaceUrl)
     const { changes } = await reader.pull()
     expect(changes).toEqual([
       { id: 'p1', deleted: false, data: { postId: 'post-1', body: 'hello' } }
@@ -385,6 +381,19 @@ describe('AudienceReader cut and resume', () => {
       /must target/
     )
     expect(reader.paused).toBe(true)
+
+    // Same target, but a chain rooted at the collection itself rather than
+    // this reader's Space: refused before anything on the reader changes.
+    const collectionRooted = {
+      ...(await grant()),
+      parentCapability: rootCapabilityId(target),
+      proof: {}
+    } as unknown as IZcap
+    expect(() => reader.replaceCapability({ zcap: collectionRooted })).toThrow(
+      /must root in the Space/
+    )
+    expect(reader.paused).toBe(true)
+    expect(reader.checkpoint).toBe(checkpoint)
 
     reader.replaceCapability({ zcap: await grant() })
     expect(reader.paused).toBe(false)

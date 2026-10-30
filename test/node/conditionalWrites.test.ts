@@ -98,7 +98,7 @@ beforeAll(async () => {
   const { serverUrl } = server
 
   const provisioned = await provisionDevGrants({
-    serverUrl: `${serverUrl}/spaces/`,
+    baseServerUrl: serverUrl,
     seed: SEED,
     collections: [{ id: PRIVATE_ID, visibility: 'private' }]
   })
@@ -131,7 +131,7 @@ beforeAll(async () => {
   port = withFeedPrimaryRead(
     createWasSyncPort({
       was: remoteStore.was,
-      spaceId: remoteStore.spaceId,
+      spaceUrl: remoteStore.spaceUrl,
       collectionId: PRIVATE_ID,
       capability: remoteStore.collectionCapability(PRIVATE_ID)!
     })

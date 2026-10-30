@@ -113,7 +113,7 @@ beforeAll(async () => {
   ;({ serverUrl } = server)
 
   const provisioned = await provisionDevGrants({
-    serverUrl: `${serverUrl}/spaces/`,
+    baseServerUrl: serverUrl,
     seed: SEED,
     collections: [{ id: PUBLIC_ID, visibility: 'public' }, PRIVATE_ID]
   })
@@ -173,7 +173,7 @@ describe('plaintext-collection sync against was-teaching-server', () => {
     const publicBody = await waitFor(async () => {
       const response = await remoteStore.was.request({
         capability: remoteStore.collectionCapability(PUBLIC_ID),
-        path: `/space/${remoteStore.spaceId}/${PUBLIC_ID}/${post.id}`,
+        url: `${remoteStore.spaceUrl}${PUBLIC_ID}/${post.id}`,
         method: 'GET'
       })
       return response.data as PostDoc
@@ -188,7 +188,7 @@ describe('plaintext-collection sync against was-teaching-server', () => {
     const privateBody = await waitFor(async () => {
       const response = await remoteStore.was.request({
         capability: remoteStore.collectionCapability(PRIVATE_ID),
-        path: `/space/${remoteStore.spaceId}/${PRIVATE_ID}/${envelopeId}`,
+        url: `${remoteStore.spaceUrl}${PRIVATE_ID}/${envelopeId}`,
         method: 'GET'
       })
       return response.data as { jwe?: unknown }
@@ -278,7 +278,7 @@ describe('plaintext-collection sync against was-teaching-server', () => {
     const strayId = 'stray-envelope'
     await remoteStore.was.request({
       capability: remoteStore.collectionCapability(PUBLIC_ID),
-      path: `/space/${remoteStore.spaceId}/${PUBLIC_ID}/${strayId}`,
+      url: `${remoteStore.spaceUrl}${PUBLIC_ID}/${strayId}`,
       method: 'PUT',
       json: { id: strayId, jwe: {} }
     })
@@ -320,7 +320,7 @@ describe('plaintext-collection sync against was-teaching-server', () => {
     // invocationTarget is a RESTful prefix of the collection `/policy` path.
     await remoteStore.was.request({
       capability: remoteStore.collectionCapability(PUBLIC_ID),
-      path: `/space/${remoteStore.spaceId}/${PUBLIC_ID}/policy`,
+      url: `${remoteStore.spaceUrl}${PUBLIC_ID}/policy`,
       method: 'PUT',
       json: { type: 'PublicCanRead' }
     })
@@ -344,9 +344,8 @@ describe('plaintext-collection sync against was-teaching-server', () => {
     expect(url).toBe(
       remoteStore.publicUrlFor({ collectionId: PUBLIC_ID, id: shared.id })
     )
-    expect(url).toBe(
-      `${serverUrl}/space/${remoteStore.spaceId}/${PUBLIC_ID}/${shared.id}`
-    )
+    expect(remoteStore.spaceUrl.startsWith(`${serverUrl}/space/`)).toBe(true)
+    expect(url).toBe(`${remoteStore.spaceUrl}${PUBLIC_ID}/${shared.id}`)
 
     // An unauthenticated reader (a plain, unsigned GET) can consume the share
     // link once the doc has replicated to the server.

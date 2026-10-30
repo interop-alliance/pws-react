@@ -52,7 +52,7 @@ import { rejectingClient } from '../fixtures/rejectingClient.js'
 import { mintRoster, rotateRoster } from '../fixtures/roster.js'
 import { checkGrants, grantsOf } from '../../src/auth/verifyResponse.js'
 import { RW_ACTIONS } from '../../src/auth/loginRequest.js'
-import { parseGrants, parseInvocationTarget } from '../../src/grants.js'
+import { parseGrants, parseGrantTarget } from '../../src/grants.js'
 import {
   earliestExpiry,
   isExpired,
@@ -74,6 +74,7 @@ import { startWasSync } from '../../src/storage/wasSync.js'
 import { isAuthError } from '@interop/was-sync/rxdb'
 import { requireStore } from '../../src/storage/storageManager.js'
 import { isUnknownEpochError, WasSyncAuthError } from '@interop/was-client/sync'
+import { rootCapabilityId } from '@interop/was-client/paths'
 import {
   createDocCipher,
   createUnprovisionedDocCipher
@@ -112,7 +113,7 @@ const APP_NAME = 'Test App'
 const SERVER_URL = 'http://localhost:3999'
 const SPACE_ID = 'account-space'
 const SPACE_URL = `${SERVER_URL}/space/${SPACE_ID}`
-const ROOT_CAPABILITY = `urn:zcap:root:${encodeURIComponent(SPACE_URL)}`
+const ROOT_CAPABILITY = rootCapabilityId(SPACE_URL)
 const COLLECTION_ID = 'notes'
 const SHARED_COLLECTION_ID = 'wallet-credentials'
 
@@ -198,8 +199,8 @@ function generationDelegation({
     parentCapability: ROOT_CAPABILITY,
     // `/space/:id/` -- the Space's items subtree, one level above any
     // collection. A grant naming THIS target would be refused by
-    // `parseInvocationTarget` (it is not collection-scoped); it rides the
-    // chain instead, where nothing here reads it.
+    // `parseGrantTarget` (it is not collection-scoped); it rides the
+    // chain instead, where only the chain's root id is read.
     invocationTarget: `${SPACE_URL}/`,
     allowedAction: RW_ACTIONS,
     expires,
@@ -388,8 +389,7 @@ async function connectedStore({
     session: {
       seed,
       controllerDid,
-      baseUrl: SERVER_URL,
-      spaceId: SPACE_ID,
+      spaceUrl: `${SPACE_URL}/`,
       grants,
       // The persisted expiry is the one the clamp produced, not the one the
       // app asked for.
@@ -445,25 +445,24 @@ describe('a depth-3 grant from a standing-credential account', () => {
       controllerDid,
       collections: [{ id: COLLECTION_ID }]
     })
-    expect(checked.parsed!.baseUrl).toBe(SERVER_URL)
-    expect(checked.parsed!.spaceId).toBe(SPACE_ID)
+    expect(checked.parsed!.spaceUrl).toBe(`${SPACE_URL}/`)
     expect(checked.parsed!.byCollectionId[COLLECTION_ID]).toBe(deep)
 
-    // Routing goes through `parseGrants` alone, on the invocation target.
+    // Routing goes through `parseGrants` alone: the Space off the chain's
+    // root, the collection off the invocation target.
     const parsed = parseGrants([deep])
     expect(Object.keys(parsed.byCollectionId)).toEqual([COLLECTION_ID])
-    expect(parsed.spaceId).toBe(SPACE_ID)
+    expect(parsed.spaceUrl).toBe(`${SPACE_URL}/`)
   })
 
-  // ASSUMPTION: the chain is data the app moves, not data it parses. The
-  // generation delegation's own target is the Space items subtree, which
-  // `parseInvocationTarget` would REFUSE if it were ever treated as a grant.
-  // That it rides the chain untouched is the proof that nothing walks it.
+  // ASSUMPTION: the chain's links are data the app moves, not data it
+  // parses; only the root id is read, for the Space URL. The generation
+  // delegation's own target is the Space items subtree, which
+  // `parseGrantTarget` would REFUSE if it were ever treated as a grant. That
+  // it rides the chain untouched is the proof that nothing walks the links.
   it('carries a parent whose target the router would refuse', () => {
     const parent = generationDelegation()
-    const target = (parent as unknown as { invocationTarget: string })
-      .invocationTarget
-    expect(() => parseInvocationTarget(target)).toThrow(/not collection-scoped/)
+    expect(() => parseGrantTarget(parent)).toThrow(/not collection-scoped/)
   })
 
   // ASSUMPTION: `parseGrants`'s single-Space assertion still holds under the
@@ -479,8 +478,7 @@ describe('a depth-3 grant from a standing-credential account', () => {
       annexGrantFor({ controller: controllerDid, collectionId, parent })
     )
     const parsed = parseGrants(grants)
-    expect(parsed.baseUrl).toBe(SERVER_URL)
-    expect(parsed.spaceId).toBe(SPACE_ID)
+    expect(parsed.spaceUrl).toBe(`${SPACE_URL}/`)
     expect(Object.keys(parsed.byCollectionId).sort()).toEqual([
       'notes',
       'projects'
@@ -676,7 +674,7 @@ describe('a mid-life authorization failure', () => {
     // depends on is exercised rather than assumed.
     const port = createWasSyncPort({
       was: rejectingClient(403),
-      spaceId: SPACE_ID,
+      spaceUrl: `${SPACE_URL}/`,
       collectionId: COLLECTION_ID
     })
     const denial = await port.putContent({ id: 'row-1', data: { x: 1 } }).then(
@@ -858,7 +856,7 @@ describe('an epoch this app cannot open', () => {
         // drives answers with no roster at all, so the retry fails too.
         remoteStore: fakeRemoteStore({
           collectionId: SHARED_COLLECTION_ID,
-          spaceId: SPACE_ID,
+          spaceUrl: `${SPACE_URL}/`,
           descriptors: [opened, undefined],
           resources: {
             [readable.id]: readable.envelope,

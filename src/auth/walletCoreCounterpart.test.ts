@@ -16,6 +16,7 @@ import {
   mintAppKeyCredential
 } from '@interop/wallet-request'
 import { agentsFromSeed } from '@interop/was-client/identity'
+import { rootCapabilityId } from '@interop/was-client/paths'
 import type {
   IVerifiableCredential,
   IVerifiablePresentation,
@@ -162,7 +163,7 @@ describe('the credential half, against wallet-core', () => {
       '@context': 'https://w3id.org/zcap/v1',
       id: `urn:zcap:${crypto.randomUUID()}`,
       controller: subjectDid,
-      parentCapability: 'urn:zcap:root:https%3A%2F%2Fwas.example%2Fspace%2Fs1',
+      parentCapability: rootCapabilityId('https://was.example/space/s1/'),
       invocationTarget: 'https://was.example/space/s1/notes',
       allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
       expires: new Date(Date.now() + 86_400_000).toISOString()
@@ -246,7 +247,7 @@ describe('the credential half, against wallet-core', () => {
     // The account Space, its root capability id, and the annex DID the
     // generation delegation is controlled by, in their wire serializations.
     const spaceUrl = 'https://was.example/space/s1'
-    const spaceRootId = `urn:zcap:root:${encodeURIComponent(spaceUrl)}`
+    const spaceRootId = rootCapabilityId(spaceUrl)
     const annexDid =
       'did:webvh:zSCID:was.example:space:annex-aux:gen-AbCdEfGhIjKlMnOp'
 
@@ -278,7 +279,16 @@ describe('the credential half, against wallet-core', () => {
       id: `urn:zcap:delegated:${crypto.randomUUID()}`,
       controller: subjectDid,
       parentCapability: generationDelegation.id,
-      capabilityChain: [spaceRootId, generationDelegation],
+      // The delegation proof carries the chain, as ezcap writes it; the
+      // Space URL is read off its root.
+      proof: {
+        type: 'Ed25519Signature2020',
+        created: new Date().toISOString(),
+        verificationMethod: `${annexDid}#key-1`,
+        proofPurpose: 'capabilityDelegation',
+        capabilityChain: [spaceRootId, generationDelegation],
+        proofValue: `z${'1'.repeat(86)}`
+      },
       invocationTarget: `${spaceUrl}/notes`,
       allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
       expires: grantExpires
@@ -314,7 +324,8 @@ describe('the credential half, against wallet-core', () => {
     const returned = grantsOf(presentation)
     expect(returned).toEqual([grant])
     expect(
-      (returned[0] as unknown as { capabilityChain: unknown[] }).capabilityChain
+      (returned[0] as unknown as { proof: { capabilityChain: unknown[] } })
+        .proof.capabilityChain
     ).toEqual([spaceRootId, generationDelegation])
 
     // Locate and parse recover the app's identity, and the grant checks pass
@@ -333,8 +344,7 @@ describe('the credential half, against wallet-core', () => {
       controllerDid: parsed.controllerDid,
       collections: [{ id: 'notes' }]
     })
-    expect(checked.parsed?.baseUrl).toBe('https://was.example')
-    expect(checked.parsed?.spaceId).toBe('s1')
+    expect(checked.parsed?.spaceUrl).toBe('https://was.example/space/s1/')
     expect(checked.parsed?.byCollectionId['notes']).toEqual(grant)
     // The clamped expiry is what the session runs on, short of the TTL the
     // app would have asked for.

@@ -25,6 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import type { IZcap } from '@interop/data-integrity-core'
 import { IntegrityError } from '@interop/was-client/sync'
+import { rootCapabilityId } from '@interop/was-client/paths'
 import {
   createAuthStore,
   type WasAuthStore
@@ -55,6 +56,8 @@ import { StorageContext } from '../../src/storage/storageContext.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../../src/log.js'
 import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
+
+const SPACE_URL = 'http://localhost:3999/space/space-1/'
 
 // Replace the live replication bootstrap with an inert resolver.
 vi.mock('../../src/storage/wasSync.js', () => ({
@@ -108,7 +111,8 @@ function noteGrants(): IZcap[] {
   return [
     {
       id: 'urn:zcap:notes',
-      invocationTarget: 'http://localhost:3999/space/space-1/notes'
+      parentCapability: rootCapabilityId(SPACE_URL),
+      invocationTarget: `${SPACE_URL}notes`
     }
   ] as unknown as IZcap[]
 }
@@ -130,22 +134,24 @@ async function sessionRecord({
   return {
     seed,
     controllerDid: identity.controllerDid,
-    baseUrl: 'http://localhost:3999',
-    spaceId: 'space-1',
+    spaceUrl: SPACE_URL,
     grants,
     expires
   }
 }
 
 /**
- * An INTERNALLY CONSISTENT grant set for a different server origin (the same
- * space id): what `parseGrants` alone cannot catch, and the reconnect
- * continuity check exists for.
+ * An INTERNALLY CONSISTENT grant set rooted in a different Space (the same
+ * space id on another server origin): what `parseGrants` alone cannot catch,
+ * and the reconnect continuity check exists for.
  */
 function otherServerGrants(): IZcap[] {
   return [
     {
       id: 'urn:zcap:notes',
+      parentCapability: rootCapabilityId(
+        'http://elsewhere.example:3999/space/space-1/'
+      ),
       invocationTarget: 'http://elsewhere.example:3999/space/space-1/notes'
     }
   ] as unknown as IZcap[]
@@ -355,7 +361,7 @@ describe('reconnect() storage-location continuity', () => {
 
     expect(store.getState().status).toBe('reconnect')
     expect(store.getState().reconnecting).toBe(false)
-    expect(store.getState().error).toMatch(/different storage location/)
+    expect(store.getState().error).toMatch(/different Space/)
     // The session was never re-pointed: no replication against the new target.
     expect(startWasSyncMock.mock.calls).toHaveLength(syncCalls)
   })
@@ -503,7 +509,8 @@ describe('boot() over an expired persisted session', () => {
         ({ id }) =>
           ({
             id: `urn:zcap:${id}`,
-            invocationTarget: `http://localhost:3999/space/space-1/${id}`
+            parentCapability: rootCapabilityId(SPACE_URL),
+            invocationTarget: `${SPACE_URL}${id}`
           }) as unknown as IZcap
       ),
       expires: futureIso(FAR_FUTURE_MS)

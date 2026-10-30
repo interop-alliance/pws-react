@@ -15,6 +15,7 @@
  * and a user cancel (a null CHAPI response surfaces `LoginCancelledError`).
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { rootCapabilityId } from '@interop/was-client/paths'
 import * as vc from '@interop/vc'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import { CapabilityAgent } from '@interop/capability-agent'
@@ -103,7 +104,7 @@ function grantFor(
     '@context': 'https://w3id.org/zcap/v1',
     id: `urn:zcap:${crypto.randomUUID()}`,
     controller: appDid,
-    parentCapability: `urn:zcap:root:${encodeURIComponent(SPACE_URL)}`,
+    parentCapability: rootCapabilityId(SPACE_URL),
     invocationTarget: `${SPACE_URL}/${collectionId}`,
     allowedAction: actions,
     expires: new Date(Date.now() + 86_400_000).toISOString()
@@ -373,6 +374,6 @@ describe('App Connect grant checking', () => {
     })
 
     expect(outcome.grants).toHaveLength(COLLECTIONS.length)
-    expect(outcome.parsed!.spaceId).toBe('e2e-space')
+    expect(outcome.parsed!.spaceUrl).toBe(`${SPACE_URL}/`)
   })
 })

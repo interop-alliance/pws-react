@@ -56,7 +56,7 @@ export interface FakeRemoteStoreProbes {
  *
  * @param options {object}
  * @param options.collectionId {string}
- * @param [options.spaceId] {string}
+ * @param [options.spaceUrl] {string}
  * @param [options.encryption] {CollectionEncryption}
  * @param [options.descriptors] {Array<CollectionEncryption | undefined>}
  * @param options.resources {object}
@@ -68,7 +68,7 @@ export interface FakeRemoteStoreProbes {
  */
 export function fakeRemoteStore({
   collectionId,
-  spaceId = 'space-1',
+  spaceUrl = 'https://was.example/space/space-1/',
   encryption,
   descriptors,
   resources,
@@ -78,7 +78,7 @@ export function fakeRemoteStore({
   descriptorReadError
 }: {
   collectionId: string
-  spaceId?: string
+  spaceUrl?: string
   encryption?: CollectionEncryption
   descriptors?: Array<CollectionEncryption | undefined>
   resources: Record<string, unknown>
@@ -151,9 +151,9 @@ export function fakeRemoteStore({
   }
 
   return {
-    spaceId,
+    spaceUrl,
     was: {
-      space() {
+      spaceAt() {
         return {
           collection() {
             return collection

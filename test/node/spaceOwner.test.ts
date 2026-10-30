@@ -37,7 +37,7 @@ beforeAll(async () => {
     })
   })
   provisioned = await provisionDevGrants({
-    serverUrl: `${server.serverUrl}/spaces/`,
+    baseServerUrl: server.serverUrl,
     seed: SEED,
     collections: ['notes']
   })
@@ -54,8 +54,7 @@ afterEach(() => {
 describe('resolveSpaceOwner', () => {
   it('resolves the published account log to the promoted controller', async () => {
     const owner = await resolveSpaceOwner({
-      baseUrl: server!.serverUrl,
-      spaceId: provisioned.spaceId
+      spaceUrl: provisioned.spaceUrl
     })
     expect(owner.did).toBe(provisioned.provisionerDid)
     expect(owner.log.length).toBeGreaterThan(0)
@@ -65,16 +64,14 @@ describe('resolveSpaceOwner', () => {
     // The genuine log, served from a different Space's `id` collection: a
     // host answering one account's log under another Space's URL.
     const { log } = await resolveSpaceOwner({
-      baseUrl: server!.serverUrl,
-      spaceId: provisioned.spaceId
+      spaceUrl: provisioned.spaceUrl
     })
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(logToJsonlString(log), { status: 200 })
     )
     await expect(
       resolveSpaceOwner({
-        baseUrl: server!.serverUrl,
-        spaceId: 'another-space'
+        spaceUrl: `${server!.serverUrl}/space/another-space/`
       })
     ).rejects.toThrow(/not where it was served from/)
   })
@@ -82,8 +79,7 @@ describe('resolveSpaceOwner', () => {
   it('refuses a Space that publishes no account log', async () => {
     await expect(
       resolveSpaceOwner({
-        baseUrl: server!.serverUrl,
-        spaceId: 'no-such-space'
+        spaceUrl: `${server!.serverUrl}/space/no-such-space/`
       })
     ).rejects.toThrow(/publishes no readable account log/)
   })

@@ -97,7 +97,7 @@ const other = makeNote('an unrelated title')
  * identity keys, invoking the collection's delegated zcap.
  */
 function collectionHandle() {
-  return remoteStore.was.space(remoteStore.spaceId).collection(PRIVATE_ID, {
+  return remoteStore.was.spaceAt(remoteStore.spaceUrl).collection(PRIVATE_ID, {
     capability: remoteStore.collectionCapability(PRIVATE_ID)
   })
 }
@@ -116,7 +116,7 @@ beforeAll(async () => {
 
   // The blinding key installs with the collection's first key epoch or never.
   const provisioned = await provisionDevGrants({
-    serverUrl: `${serverUrl}/spaces/`,
+    baseServerUrl: serverUrl,
     seed: SEED,
     collections: [
       { id: PRIVATE_ID, visibility: 'private', blindedIndex: true },

@@ -1,5 +1,41 @@
 # @interop/was-react Changelog
 
+## 0.32.0 - TBD
+
+### Changed
+
+- Breaking: a grant's Space is read off its delegation chain's root
+  (was-client's `spaceUrlOf`), and its `invocationTarget` is classified beneath
+  that Space URL. `ParsedGrants` carries `spaceUrl` in place of `baseUrl` and
+  `spaceId`; the two "grants span two servers / two spaces" checks collapse into
+  one on the Space URL. `parseInvocationTarget(target)` is replaced by
+  `parseGrantTarget(zcap)`, which returns `{ spaceUrl, collectionId }`. The
+  Space URL the root names is taken as given, in any form (a single fixed Space
+  may live at any URL). A grant whose chain starts at no Space root capability
+  is refused, as this module's own grant error with was-client's
+  `ValidationError` as `cause`.
+- `AudienceReader.replaceCapability` refuses a zcap whose chain roots in another
+  Space, and changes nothing on the reader until every check has passed.
+- Breaking: `WasRemoteStore` and `AudienceReader` build their client with
+  `WasClient.forSpace({ spaceUrl })`: a grants-only app holds a Space URL and
+  nothing above it. `WasRemoteStore.spaceUrl` replaces `spaceId`, and
+  `AudienceReader.spaceUrl` replaces `serverUrl`.
+- Breaking: `resolveSpaceOwner`, `createSpaceTrust`, and `createWasSyncPort`
+  take `spaceUrl` in place of `baseUrl` / `spaceId`.
+- Breaking: the persisted session record (`AppSessionRecord`) carries `spaceUrl`
+  in place of `baseUrl` and `spaceId`. A record in the old shape fails the
+  structural check and the reload lands in `local`; the next login re-persists
+  it.
+- Breaking: `provisionDevGrants` takes `baseServerUrl` (the server's base, e.g.
+  `http://localhost:3002/`) in place of `serverUrl` (the Spaces Repository URL),
+  builds the Space URL with `was.space(id).url`, and delegates each grant on a
+  target built beneath it.
+- The sync controller fills was-sync's port with `spaceUrl`. was-sync's default
+  replication identifier changed with it, so every replica re-pulls its
+  Collection from the beginning once.
+- `@interop/was-client` `^0.100.1`, `@interop/wallet-core` `^0.109.0`,
+  `@interop/was-sync` `^0.11.0`, `@interop/did-method-webvh` `^5.18.0`.
+
 ## 0.31.0 - 2026-10-29
 
 ### Changed

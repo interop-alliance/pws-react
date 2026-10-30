@@ -37,8 +37,8 @@
  *      authorizes an app-side PUT of the Collection Metadata object (the
  *      `meta` sub-resource).
  *
- * The server URL must be one did:webvh accepts: `https://`, or `http://` on
- * the literal host `localhost` (not `127.0.0.1`).
+ * The base server URL must be one did:webvh accepts: `https://`, or `http://`
+ * on the literal host `localhost` (not `127.0.0.1`).
  *
  * Node only (uses `fs`); consumed through the package `./dev` subpath.
  */
@@ -50,11 +50,9 @@ import type { IDelegatedZcap } from '@interop/data-integrity-core'
 import { CapabilityAgent } from '@interop/capability-agent'
 import { agentsFromKeyAgent } from '@interop/was-client/identity'
 import {
-  collectionMeta,
-  collectionPath,
-  rootCapability,
-  spacePath,
-  toUrl
+  collectionMetaUrl,
+  collectionUrl,
+  rootCapability
 } from '@interop/was-client/paths'
 import {
   ensureSpace,
@@ -114,8 +112,8 @@ export interface ProvisionDevGrantsResult {
    */
   spaceId: string
   /**
-   * The canonical absolute space URL (`<baseUrl>/space/<spaceId>/`, with
-   * the trailing slash a container URL carries).
+   * The canonical absolute space URL (`{base}space/<spaceId>/`, with the
+   * trailing slash a container URL carries).
    */
   spaceUrl: string
   /**
@@ -144,8 +142,9 @@ export interface ProvisionDevGrantsResult {
  * to the app DID derived from `seed`.
  *
  * @param options {object}
- * @param options.serverUrl {string}   the Spaces Repository URL of a running
- *   was-teaching-server (`http://localhost:3002/spaces/`)
+ * @param options.baseServerUrl {string}   the base server URL of a running
+ *   was-teaching-server (`http://localhost:3002/`), under which it lays out
+ *   `service`, `spaces/` and `space/{id}/`
  * @param options.seed {Uint8Array}   the app (requester) master seed; the
  *   app DID the grants are delegated to is derived from it
  * @param options.collections {Array<string | object>}   the WAS collections to
@@ -179,7 +178,7 @@ export interface ProvisionDevGrantsResult {
  * @returns {Promise<ProvisionDevGrantsResult>}
  */
 export async function provisionDevGrants({
-  serverUrl,
+  baseServerUrl,
   seed,
   collections,
   spaceName = 'Dev Space',
@@ -193,7 +192,7 @@ export async function provisionDevGrants({
   probe = false,
   log = () => {}
 }: {
-  serverUrl: string
+  baseServerUrl: string
   seed: Uint8Array
   collections: Array<
     | string
@@ -232,17 +231,21 @@ export async function provisionDevGrants({
     keyAgreementKey: clientKeyAgreementKey
   } = agentsFromKeyAgent({ keyAgent })
   const { publicKeyMultibase: keyAgreementKeyMultibase } = clientKeyAgreementKey
-  const clientWas = new WasClient({ serverUrl, zcapClient: clientZcapClient })
-  // wallet-core's provisioning helpers and the path builders take the server
-  // base URL, the parent of the Spaces Repository URL the client was given.
-  const baseUrl = clientWas.baseUrl
+  const clientWas = new WasClient({
+    baseServerUrl,
+    zcapClient: clientZcapClient
+  })
   // Every run mints a fresh Space, so the update keys are minted per run too
   // and discarded with it: nothing ever appends to this log again.
   const updateKeys = mintClientWebvhUpdateKeys()
   const pinStore = memoryResourceLogPinStore()
   const spaceId = mintSpaceId()
+  // The one place a Space URL is built rather than received: the dev
+  // provisioner holds the base and mints the id, so the client's own layout
+  // rule names the Space.
+  const spaceUrl = clientWas.space(spaceId).url
 
-  log(`Provisioning against ${serverUrl}`)
+  log(`Provisioning against ${baseServerUrl}`)
   log(`  provisioner key: ${clientDid}`)
   log(`  app (RP) DID:    ${appDid}`)
   log(`  space id:        ${spaceId}`)
@@ -254,7 +257,7 @@ export async function provisionDevGrants({
   // so the governing log's genesis below is what declares it encrypted.
   const spaceDescription = await ensureSpace({
     was: clientWas,
-    spaceId,
+    spaceUrl,
     controllerDid: clientDid,
     spaceName
   })
@@ -269,7 +272,7 @@ export async function provisionDevGrants({
   await Promise.all([
     ensureSpaceAndCollection({
       was: clientWas,
-      spaceId,
+      spaceUrl,
       controllerDid: clientDid,
       spaceDescription,
       collectionId: ID_COLLECTION_SPEC.collectionId,
@@ -280,7 +283,7 @@ export async function provisionDevGrants({
     ...entries.map(({ id, visibility }) =>
       ensureSpaceAndCollection({
         was: clientWas,
-        spaceId,
+        spaceUrl,
         controllerDid: clientDid,
         spaceDescription,
         collectionId: id,
@@ -295,7 +298,7 @@ export async function provisionDevGrants({
   // pin.
   const { did } = await ensureDidWebvh({
     idStore: wasWebvhIdStore({ was: clientWas, spaceId, pinStore }),
-    wasServerUrl: baseUrl,
+    baseServerUrl,
     spaceId,
     clientKeys: {
       signingKeyMultibase: clientSigningKeyMultibase({ keyAgent }),
@@ -311,7 +314,7 @@ export async function provisionDevGrants({
   // collection. The blinding key rides along with the first epoch or is
   // never installed at all, so the choice is made here and nowhere later.
   const storeFor = accountCollectionStores({
-    storageServerUrl: baseUrl,
+    baseServerUrl,
     zcapClient: clientZcapClient,
     spaceId,
     did,
@@ -357,10 +360,9 @@ export async function provisionDevGrants({
   // everything the app invokes under it: its resources, the `query`
   // endpoint, the listing, and its Metadata object at `meta`.
   const owner = new WasClient({
-    serverUrl,
+    baseServerUrl,
     zcapClient: webvhZcapClient({ keyAgent, did })
   })
-  const spaceUrl = toUrl({ baseUrl, path: spacePath(spaceId) })
   const spaceRoot = rootCapability({ target: spaceUrl, controller: did })
 
   // `Promise.all` preserves input order, so `grants[i]` still corresponds to
@@ -371,7 +373,7 @@ export async function provisionDevGrants({
         to: appDid,
         actions,
         expires,
-        target: toUrl({ baseUrl, path: collectionPath(spaceId, id) }),
+        target: collectionUrl({ spaceUrl, collectionId: id }),
         capability: spaceRoot
       })
       log(`  collection "${id}": created (${visibility}) + delegated RW to app`)
@@ -405,15 +407,18 @@ export async function provisionDevGrants({
   // one member left out is `encryption`. On a log-governed collection the
   // server derives it from the `meta/log` head and refuses any write that
   // carries it (409), so echoing it back would read as a refusal.
-  const appWas = new WasClient({ serverUrl, zcapClient: appZcapClient })
+  const appWas = new WasClient({ baseServerUrl, zcapClient: appZcapClient })
   const probeCollectionId = entries[0]!.id
   const probeCapability = grants[0]!
-  const probePath = collectionMeta(spaceId, probeCollectionId)
+  const probeUrl = collectionMetaUrl({
+    spaceUrl,
+    collectionId: probeCollectionId
+  })
   log(`\nMetadata-write probe on "${probeCollectionId}" (delegated RW zcap):`)
   try {
     const current = await appWas.request({
       capability: probeCapability,
-      path: probePath,
+      url: probeUrl,
       method: 'GET'
     })
     const { encryption: _derived, ...writable } = (current.data ?? {
@@ -421,7 +426,7 @@ export async function provisionDevGrants({
     }) as { encryption?: unknown } & Record<string, unknown>
     const response = await appWas.request({
       capability: probeCapability,
-      path: probePath,
+      url: probeUrl,
       method: 'PUT',
       json: writable
     })

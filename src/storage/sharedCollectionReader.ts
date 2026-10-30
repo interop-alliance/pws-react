@@ -293,7 +293,7 @@ export class SharedCollectionReader {
       )
     }
     return this.#remoteStore.was
-      .space(this.#remoteStore.spaceId)
+      .spaceAt(this.#remoteStore.spaceUrl)
       .collection(this.collectionId, { capability, encryption: 'plaintext' })
   }
 

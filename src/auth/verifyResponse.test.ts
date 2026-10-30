@@ -9,6 +9,7 @@
  * RP-side checks are exercised against good and crafted-bad inputs.
  */
 import { beforeAll, describe, expect, it } from 'vitest'
+import { rootCapabilityId } from '@interop/was-client/paths'
 import * as vc from '@interop/vc'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import { CapabilityAgent } from '@interop/capability-agent'
@@ -104,7 +105,7 @@ function grantFor({
     '@context': 'https://w3id.org/zcap/v1',
     id: `urn:zcap:${crypto.randomUUID()}`,
     controller,
-    parentCapability: `urn:zcap:root:${encodeURIComponent(spaceUrl)}`,
+    parentCapability: rootCapabilityId(spaceUrl),
     invocationTarget: collectionId ? `${spaceUrl}/${collectionId}` : spaceUrl,
     allowedAction: actions,
     expires
@@ -409,8 +410,7 @@ describe('checkGrants', () => {
       controllerDid: appDid,
       collections: TEST_COLLECTION_REQUESTS
     })
-    expect(checked.parsed?.baseUrl).toBe(SERVER_URL)
-    expect(checked.parsed?.spaceId).toBe('e2e-space')
+    expect(checked.parsed?.spaceUrl).toBe(`${SPACE_URL}/`)
     expect(Object.keys(checked.parsed!.byCollectionId)).toHaveLength(
       TEST_COLLECTIONS.length
     )
@@ -467,7 +467,7 @@ describe('checkGrants', () => {
         controllerDid: appDid,
         collections: TEST_COLLECTION_REQUESTS
       })
-    ).toThrow(/two spaces/)
+    ).toThrow(/two Spaces/)
   })
 
   it('rejects a set missing a collection', () => {

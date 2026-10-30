@@ -33,11 +33,7 @@ export {
 } from './config.js'
 
 // Grant parsing / topology routing.
-export {
-  parseInvocationTarget,
-  parseGrants,
-  type ParsedGrants
-} from './grants.js'
+export { parseGrantTarget, parseGrants, type ParsedGrants } from './grants.js'
 
 // Identity: the seed-derived agents, including the identity key-agreement key
 // every encrypted collection is read with.

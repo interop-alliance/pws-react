@@ -14,8 +14,8 @@
  * The reader takes a zcap directly rather than a `WasRemoteStore`: a
  * subscriber's capability comes from the subscription agent's own API, not
  * from a wallet presentation, and it reads another owner's Space, possibly on
- * another host. The client is therefore built from the zcap's own
- * `invocationTarget`.
+ * another host. The client is therefore built on the Space the zcap's
+ * delegation chain is rooted in (`spaceUrlOf`), with nothing above it.
  *
  * `pull()` follows the collection's `changes` feed through the read-only GET
  * form of the query endpoint, which is what a GET and HEAD grant reaches,
@@ -59,9 +59,9 @@ import {
   type Json
 } from '@interop/was-client'
 import {
-  collectionPath,
-  parseAbsoluteSpaceTarget,
-  spacesUrl
+  collectionUrl,
+  parseSpaceTarget,
+  spaceUrlOf
 } from '@interop/was-client/paths'
 import { errorStatus } from '@interop/was-client/sync'
 import { log } from '../log.js'
@@ -113,8 +113,10 @@ interface FeedRead {
 }
 
 export class AudienceReader {
-  readonly serverUrl: string
-  readonly #spaceId: string
+  /**
+   * The Space the audience lives in, read off the zcap's chain root.
+   */
+  readonly spaceUrl: string
   readonly #collectionId: string
   readonly #pageSize: number
   readonly #was: WasClient
@@ -132,27 +134,24 @@ export class AudienceReader {
   #chain: Promise<unknown> = Promise.resolve()
 
   private constructor({
-    serverUrl,
-    spaceId,
+    spaceUrl,
     collectionId,
     zcap,
     signer,
     checkpoint,
     pageSize
   }: {
-    serverUrl: string
-    spaceId: string
+    spaceUrl: string
     collectionId: string
     zcap: IZcap
     signer: ISigner
     checkpoint: ChangesCheckpoint | null
     pageSize: number
   }) {
-    this.serverUrl = serverUrl
-    this.#spaceId = spaceId
+    this.spaceUrl = spaceUrl
     this.#collectionId = collectionId
     this.#zcap = zcap
-    this.#was = WasClient.fromSigner({ serverUrl, signer })
+    this.#was = WasClient.forSpace({ spaceUrl, signer })
     this.#collection = this.#was.fromCapability(zcap) as Collection
     this.#checkpoint = checkpoint
     this.#pageSize = pageSize
@@ -164,8 +163,9 @@ export class AudienceReader {
    *
    * @param options {object}
    * @param options.zcap {IZcap}   the GET and HEAD zcap on the audience's
-   *   container; its `invocationTarget` must name a collection and its
-   *   `allowedAction` must include `GET`
+   *   container; its chain must root in a Space, its `invocationTarget` must
+   *   name a collection of that Space, and its `allowedAction` must include
+   *   `GET`
    * @param options.signer {ISigner}   the subscriber's invocation signer (the
    *   zcap's controller)
    * @param [options.checkpoint] {ChangesCheckpoint}   a checkpoint a previous
@@ -186,18 +186,18 @@ export class AudienceReader {
     pageSize?: number
   }): AudienceReader {
     const target = zcap.invocationTarget
-    const parsed = parseAbsoluteSpaceTarget(target)
-    if (parsed === null || parsed.path.kind !== 'collection') {
+    const spaceUrl = spaceUrlOf(zcap)
+    const path = parseSpaceTarget({ spaceUrl, target })
+    if (path === null || path.kind !== 'collection') {
       throw new Error(
-        `An audience zcap's invocationTarget must name a collection on a ` +
-          `WAS server (an absolute URL); got "${target}".`
+        `An audience zcap's invocationTarget must name a collection of the ` +
+          `Space its chain is rooted in ("${spaceUrl}"); got "${target}".`
       )
     }
     assertAllowsGet(zcap)
     return new AudienceReader({
-      serverUrl: spacesUrl({ baseUrl: parsed.baseUrl }),
-      spaceId: parsed.path.spaceId,
-      collectionId: parsed.path.collectionId,
+      spaceUrl,
+      collectionId: path.collectionId,
       zcap,
       signer,
       checkpoint,
@@ -243,9 +243,10 @@ export class AudienceReader {
    * Resumes a paused reader under a replacement zcap for the same audience,
    * from the checkpoint the cut left it at. Accepted on a live reader too (a
    * renewal ahead of expiry); a request in flight under the previous zcap
-   * cannot pause the reader after this. Refuses a zcap for another target,
-   * since the checkpoint belongs to this collection alone, and one that does
-   * not allow `GET`, which could only pause the reader again.
+   * cannot pause the reader after this. Refuses a zcap for another target or
+   * for another Space, since the checkpoint belongs to this collection alone,
+   * and one that does not allow `GET`, which could only pause the reader
+   * again. A refused replacement leaves the reader as it was.
    *
    * @param options {object}
    * @param options.zcap {IZcap}
@@ -257,9 +258,17 @@ export class AudienceReader {
           `"${zcap.invocationTarget}".`
       )
     }
+    const spaceUrl = spaceUrlOf(zcap)
+    if (spaceUrl !== this.spaceUrl) {
+      throw new Error(
+        `A replacement audience zcap must root in the Space ` +
+          `"${this.spaceUrl}"; its chain roots in "${spaceUrl}".`
+      )
+    }
     assertAllowsGet(zcap)
+    const collection = this.#was.fromCapability(zcap) as Collection
     this.#zcap = zcap
-    this.#collection = this.#was.fromCapability(zcap) as Collection
+    this.#collection = collection
     this.#generation += 1
     this.#paused = false
   }
@@ -464,7 +473,10 @@ export class AudienceReader {
     try {
       await this.#was.request({
         capability: this.#zcap,
-        path: collectionPath(this.#spaceId, this.#collectionId),
+        url: collectionUrl({
+          spaceUrl: this.spaceUrl,
+          collectionId: this.#collectionId
+        }),
         method: 'GET'
       })
     } catch (err) {
