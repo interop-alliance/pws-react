@@ -4,7 +4,7 @@
 /**
  * Unit tests for the four-state session machine, driving a real seed-derived
  * identity and a real (fake-indexeddb) LocalStore open, with the live
- * replication bootstrap (`startWasSync`) mocked to an inert no-op. Covers the
+ * replication bootstrap (`startPwsSync`) mocked to an inert no-op. Covers the
  * boot / local / connect / logout / clear-data transitions:
  *
  * - `boot()` with nothing persisted lands `local` (a fresh anonymous seed is
@@ -26,15 +26,15 @@ import { IDBFactory } from 'fake-indexeddb'
 import type { IZcap } from '@interop/data-integrity-core'
 import {
   createAuthStore,
-  type WasAuthStore
+  type PwsAuthStore
 } from '../../src/session/authStore.js'
 import {
   createDescriptorCache,
   createSeedStore,
   type SeedStore
 } from '../../src/identity/seedStore.js'
-import { WasServerError, type CollectionEncryption } from '@interop/was-client'
-import { rootCapabilityId } from '@interop/was-client/paths'
+import { PwsServerError, type CollectionEncryption } from '@interop/pws-client'
+import { rootCapabilityId } from '@interop/pws-client/paths'
 import {
   deriveIdentity,
   type IdentityAgents
@@ -47,8 +47,8 @@ import {
 } from '../../src/auth/loginFlow.js'
 import {
   readRemoteDescriptors,
-  startWasSync
-} from '../../src/storage/wasSync.js'
+  startPwsSync
+} from '../../src/storage/pwsSync.js'
 import { mintRecordEncryption } from '../../src/index.js'
 import { hasStore, requireStore } from '../../src/storage/storageManager.js'
 import { createEntityStore } from '../../src/storage/entityStore.js'
@@ -58,7 +58,7 @@ import {
   LocalStore,
   dbNameForController
 } from '../../src/storage/localStore.js'
-import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
+import type { StoreRegistry, PwsAppConfig } from '../../src/config.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../../src/log.js'
 
@@ -69,8 +69,8 @@ const SPACE_URL = 'http://localhost:3999/space/space-1/'
 // login-time descriptor read serves the mocked "server side" of descriptor
 // provisioning (see `serveRemoteDescriptors`), so it stays correct for
 // whichever identity connects and no test has to re-arm it.
-vi.mock('../../src/storage/wasSync.js', () => ({
-  startWasSync: vi.fn(async () => ({})),
+vi.mock('../../src/storage/pwsSync.js', () => ({
+  startPwsSync: vi.fn(async () => ({})),
   readRemoteDescriptors: vi.fn(
     async (options: Parameters<typeof serveRemoteDescriptors>[0]) => ({
       descriptors: await serveRemoteDescriptors(options),
@@ -147,7 +147,7 @@ vi.mock('../../src/auth/loginFlow.js', async importOriginal => {
 })
 
 const loginWithWalletMock = vi.mocked(loginWithWallet)
-const startWasSyncMock = vi.mocked(startWasSync)
+const startPwsSyncMock = vi.mocked(startPwsSync)
 const readRemoteDescriptorsMock = vi.mocked(readRemoteDescriptors)
 
 const registry: StoreRegistry = {}
@@ -159,7 +159,7 @@ function futureIso(ms: number): string {
   return new Date(Date.now() + ms).toISOString()
 }
 
-function baseConfig(): WasAppConfig {
+function baseConfig(): PwsAppConfig {
   return {
     appName: 'Test App',
     appOrigin: 'http://localhost:5173',
@@ -244,12 +244,12 @@ async function enterSwap({
   gate,
   storage = gate.storage
 }: {
-  config: WasAppConfig
+  config: PwsAppConfig
   seed: Uint8Array
   gate: ReturnType<typeof gatedStorage>
   storage?: RxStorage<unknown, unknown>
 }): Promise<{
-  store: WasAuthStore
+  store: PwsAuthStore
   anonDid: string
   connecting: Promise<void>
 }> {
@@ -271,7 +271,7 @@ async function enterSwap({
 }
 
 async function connectedDbFor(
-  config: WasAppConfig,
+  config: PwsAppConfig,
   seed: Uint8Array
 ): Promise<string> {
   const { controllerDid } = await deriveIdentity({ seed })
@@ -279,12 +279,12 @@ async function connectedDbFor(
 }
 
 // Track created stores so their expiry-watch intervals never outlive a test.
-const liveStores: WasAuthStore[] = []
+const liveStores: PwsAuthStore[] = []
 
 // Probe replicas opened directly to inspect a torn-down anonymous database.
 const probeStores: LocalStore[] = []
 
-function makeStore(config: WasAppConfig, seedStore: SeedStore): WasAuthStore {
+function makeStore(config: PwsAppConfig, seedStore: SeedStore): PwsAuthStore {
   const store = createAuthStore({ config, registry, seedStore })
   liveStores.push(store)
   return store
@@ -301,7 +301,7 @@ async function reopenReplica({
   seed,
   controllerDid
 }: {
-  config: WasAppConfig
+  config: PwsAppConfig
   seed: Uint8Array
   controllerDid: string
 }): Promise<LocalStore> {
@@ -720,7 +720,7 @@ describe('login()', () => {
       expires: futureIso(FAR_FUTURE_MS),
       firstRun: true
     })
-    startWasSyncMock.mockClear()
+    startPwsSyncMock.mockClear()
 
     const outcome = await store.getState().login()
 
@@ -728,7 +728,7 @@ describe('login()', () => {
     expect(store.getState().status).toBe('connected')
     expect(store.getState().error).toBeNull()
     expect(store.getState().controllerDid).toBe(identity.controllerDid)
-    expect(startWasSyncMock).not.toHaveBeenCalled()
+    expect(startPwsSyncMock).not.toHaveBeenCalled()
   })
 
   it('leaves local intact when the wallet login is cancelled', async () => {
@@ -923,7 +923,7 @@ describe('adoption', () => {
     // descriptor": the connected replica would open under the placeholder
     // cipher and the adoption merge would fail on a correctly provisioned
     // collection.
-    const badGateway = new WasServerError('Bad Gateway', { status: 502 })
+    const badGateway = new PwsServerError('Bad Gateway', { status: 502 })
     readRemoteDescriptorsMock.mockResolvedValueOnce({
       descriptors: {},
       failures: [
@@ -1183,10 +1183,10 @@ describe('adoption', () => {
    * the open popup. `release()` lets the wallet answer.
    */
   async function parkLogin(
-    config: WasAppConfig,
+    config: PwsAppConfig,
     seedStore: SeedStore = newSeedStore()
   ): Promise<{
-    store: WasAuthStore
+    store: PwsAuthStore
     anonDid: string
     identity: IdentityAgents
     pending: Promise<{ firstRun: boolean } | null>
@@ -1228,7 +1228,7 @@ describe('adoption', () => {
    * substring match is what proves no replica was opened under that DID.
    */
   async function replicaDbNames(
-    config: WasAppConfig,
+    config: PwsAppConfig,
     controllerDid: string
   ): Promise<string[]> {
     const dbName = dbNameForController({
@@ -1379,7 +1379,7 @@ describe('sync bootstrap failure', () => {
     await persistSession({ seedStore })
     const store = makeStore(baseConfig(), seedStore)
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    startWasSyncMock.mockRejectedValueOnce(new Error('bootstrap boom'))
+    startPwsSyncMock.mockRejectedValueOnce(new Error('bootstrap boom'))
 
     await store.getState().boot()
 

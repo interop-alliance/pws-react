@@ -4,11 +4,11 @@
 /**
  * The replica schema is stored state: RxDB hashes the declared schema and
  * refuses to open an existing collection whose stored hash differs at the same
- * `version`. The schema this library declares comes from `@interop/was-sync`,
- * which since 0.8.0 carries the server's write stamp (`updatedAtCounter`,
- * `originId`, the nested `meta`) in place of the integer `version` /
- * `metaVersion`, so a replica created under the previous shape cannot be
- * reopened.
+ * `version`. The schema this library declares comes from `@interop/pws-sync`.
+ * Since `@interop/was-sync` 0.8.0, that package's former name, it carries the
+ * server's write stamp (`updatedAtCounter`, `originId`, the nested `meta`) in
+ * place of the integer `version` / `metaVersion`, so a replica created under
+ * the previous shape cannot be reopened.
  *
  * This test pins that refusal, and with it the CHANGELOG's note that every
  * remembered browser has to clear its local data and log in again once. It
@@ -29,7 +29,7 @@ import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { createRxDatabase } from 'rxdb/plugins/core'
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
-import { syncedDocSchema } from '@interop/was-sync'
+import { syncedDocSchema } from '@interop/pws-sync'
 import { LocalStore } from '../../src/storage/localStore.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 

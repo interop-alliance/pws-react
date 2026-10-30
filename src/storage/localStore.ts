@@ -37,19 +37,19 @@ import {
   validateCollections,
   validateSharedCollections,
   type SharedCollectionConfig,
-  type WasCollectionConfig
+  type PwsCollectionConfig
 } from '../config.js'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import {
   DescriptorRefreshPolicy,
   type EncryptionDescriptorSource
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import {
   makeLwwConflictHandler,
   syncedDocSchema,
   type Json,
   type SyncedDoc
-} from '@interop/was-sync'
+} from '@interop/pws-sync'
 import {
   createDocCipher,
   createPlaintextDocCodec,
@@ -58,13 +58,13 @@ import {
 } from './docCipher.js'
 import { log } from '../log.js'
 import { remotePayloadWins } from '@interop/social-core'
-import { epochRostersEqual, hasKeyEpochs } from '@interop/was-client/edv'
+import { epochRostersEqual, hasKeyEpochs } from '@interop/pws-client/edv'
 import {
   acquireGovernedDescriptor,
   isDescriptorRefusal,
   isRosterEntryFailure
 } from './governedDescriptors.js'
-import { isIntegrityError, isUnknownEpochError } from '@interop/was-client/sync'
+import { isIntegrityError, isUnknownEpochError } from '@interop/pws-client/sync'
 import type {
   IKeyAgreementKey,
   IKeyResolver
@@ -179,7 +179,7 @@ function toleratesMalformedPublicRow({
 }
 
 /**
- * Builds one collection's LWW conflict-side decrypt closure. was-sync calls it
+ * Builds one collection's LWW conflict-side decrypt closure. pws-sync calls it
  * once per side with that side's OWN `SyncedDoc.id` (the row's stored id), never
  * an id read out of the decrypted payload: the payload's own `id` is a
  * different, logical uuid on a private (random-id) collection, and trusting it
@@ -213,7 +213,7 @@ function conflictSideDecrypt({
     } catch (err) {
       // A tolerated malformed row is compared on whatever last-write-wins
       // stamp its body still carries (hydration skips it either way, see
-      // `#decodeAll`). A private collection's mismatch propagates, and was-sync
+      // `#decodeAll`). A private collection's mismatch propagates, and pws-sync
       // keeps it separate from its undecryptable-side handling: it comes out of
       // `resolve`, RxDB scores the resolution itself as failed, and that
       // collection's replication cycle fails the way any other fatal
@@ -300,8 +300,8 @@ export class LocalStore {
   #db: RxDatabase
   #collections: Record<string, RxCollection<SyncedDoc>>
   #ciphers: Record<string, DocCipher>
-  #configs: Record<string, WasCollectionConfig>
-  // The reverse of `#configs`: WAS collection id -> logical key, so a lookup by
+  #configs: Record<string, PwsCollectionConfig>
+  // The reverse of `#configs`: PWS collection id -> logical key, so a lookup by
   // wire id (a fetched remote descriptor) costs no registry scan.
   #keyByCollectionId: Map<string, string>
   // Per-collection logical-uuid -> envelope (RxDB primary key) index.
@@ -351,7 +351,7 @@ export class LocalStore {
     db: RxDatabase
     collections: Record<string, RxCollection<SyncedDoc>>
     ciphers: Record<string, DocCipher>
-    configs: Record<string, WasCollectionConfig>
+    configs: Record<string, PwsCollectionConfig>
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
     descriptors: Record<string, CollectionEncryption | undefined>
@@ -466,14 +466,14 @@ export class LocalStore {
    *   (`IdentityAgents.keyAgreementKey`)
    * @param options.keyResolver {IKeyResolver}   its one-key resolver
    *   (`IdentityAgents.keyResolver`)
-   * @param options.collections {WasCollectionConfig[]}   the collection registry
-   *   (logical key to WAS collection id)
+   * @param options.collections {PwsCollectionConfig[]}   the collection registry
+   *   (logical key to PWS collection id)
    * @param [options.sharedCollections] {SharedCollectionConfig[]}   the shared
    *   (read-only, wallet-owned) registry. Nothing is opened for these -- they
    *   have no local replica -- but they are validated against the app-owned
    *   registry here, before any replica exists
    * @param [options.descriptors] {Record<string, CollectionEncryption>}   cached
-   *   encryption descriptors keyed by WAS collection id (from the offline cache)
+   *   encryption descriptors keyed by PWS collection id (from the offline cache)
    * @param [options.storage] {ReplicaStorage}   defaults to Dexie/IndexedDB;
    *   injectable for tests
    * @param [options.dbName] {string}   defaults to {@link DEFAULT_DB_NAME}
@@ -490,7 +490,7 @@ export class LocalStore {
   }: {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
-    collections: WasCollectionConfig[]
+    collections: PwsCollectionConfig[]
     sharedCollections?: SharedCollectionConfig[]
     descriptors?: Record<string, CollectionEncryption>
     storage?: ReplicaStorage
@@ -617,14 +617,14 @@ export class LocalStore {
   }
 
   /**
-   * The registered {@link WasCollectionConfig} for one collection key (the
-   * WAS collection id, visibility, and declared indexes the storage layer
+   * The registered {@link PwsCollectionConfig} for one collection key (the
+   * PWS collection id, visibility, and declared indexes the storage layer
    * routes on).
    *
    * @param key {string}   the collection logical key
-   * @returns {WasCollectionConfig}
+   * @returns {PwsCollectionConfig}
    */
-  collectionConfig(key: string): WasCollectionConfig {
+  collectionConfig(key: string): PwsCollectionConfig {
     const config = this.#configs[key]
     if (!config) {
       throw new Error(`Unknown collection "${key}".`)
@@ -865,7 +865,7 @@ export class LocalStore {
   }
 
   /**
-   * Installs one collection's stored metadata (by WAS collection id) on its
+   * Installs one collection's stored metadata (by PWS collection id) on its
    * cipher: the persisted blinded-index schema lives inside that metadata, and
    * installing it is what makes subsequent LOCAL writes emit blinded `indexed`
    * entries, so the envelopes this replica pushes are findable by an equality
@@ -879,7 +879,7 @@ export class LocalStore {
    * throws: an undecodable envelope is the caller's warn-and-continue.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param [options.custom] {unknown}   the stored `custom` value from the
    *   collection's `/meta` (an opaque envelope on an encrypted collection)
    * @returns {Promise<boolean>}   whether the metadata was remembered/applied
@@ -921,7 +921,7 @@ export class LocalStore {
   }
 
   /**
-   * Applies a freshly fetched remote encryption descriptor (by WAS collection id):
+   * Applies a freshly fetched remote encryption descriptor (by PWS collection id):
    * rebuilds that collection's cipher when the descriptor's current epoch differs
    * from the one the current cipher was built from (a wallet-side rotation, or
    * first-ever epochs), so subsequent writes stamp the current epoch. Returns
@@ -941,7 +941,7 @@ export class LocalStore {
    * evidence of a NEW rotation elsewhere and deserves its own re-read.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.encryption {CollectionEncryption}   the fetched descriptor
    * @returns {Promise<boolean>}
    */
@@ -1335,7 +1335,7 @@ export class LocalStore {
    *
    * @param options {object}
    * @param options.key {string}
-   * @param options.id {string}   the row's own id -- the RxDB primary key / WAS
+   * @param options.id {string}   the row's own id -- the RxDB primary key / PWS
    *   resource id a patch is addressed by, or the `SyncedDoc.id` a conflict side
    *   carries. See {@link LocalStore.#decryptWithRefresh}.
    * @param options.envelope {Json}   the `data` field of the at-rest row

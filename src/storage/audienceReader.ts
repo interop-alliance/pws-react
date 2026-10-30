@@ -11,7 +11,7 @@
  * stable post id, which lives in the post body; the resource id is not a
  * stable identity, since a post that changes audience moves.
  *
- * The reader takes a zcap directly rather than a `WasRemoteStore`: a
+ * The reader takes a zcap directly rather than a `PwsRemoteStore`: a
  * subscriber's capability comes from the subscription agent's own API, not
  * from a wallet presentation, and it reads another owner's Space, possibly on
  * another host. The client is therefore built on the Space the zcap's
@@ -30,13 +30,13 @@
  * routine path rather than an error. The reader then reports the feed as
  * paused, keeps its checkpoint, and resumes from it once `replaceCapability`
  * hands it a replacement zcap for the same audience. On the wire a denial is
- * a 401 or 403, or the masked 404 WAS answers an unauthorized caller with
+ * a 401 or 403, or the masked 404 PWS answers an unauthorized caller with
  * (named `capability-revoked` or `capability-expired` when the request
  * itself verified, bare when the chain no longer verifies, which is what a
  * collected generation looks like). A collection deleted under the reader
  * is the same 404 and pauses it the same way; it just never resumes.
  *
- * was-client's body reads (`get`, `list`) answer `null` on any 404, the
+ * pws-client's body reads (`get`, `list`) answer `null` on any 404, the
  * masked denial included, so a null from one of them is ambiguous. The reader
  * settles it with one signed GET of the container through the `request`
  * escape hatch, which maps the denial to its typed error instead.
@@ -48,7 +48,7 @@ import {
   NotFoundError,
   NotImplementedError,
   ValidationError,
-  WasClient,
+  PwsClient,
   allowsAction,
   isDenialError,
   mapError,
@@ -57,13 +57,13 @@ import {
   type ISigner,
   type IZcap,
   type Json
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   collectionUrl,
   parseSpaceTarget,
   spaceUrlOf
-} from '@interop/was-client/paths'
-import { errorStatus } from '@interop/was-client/sync'
+} from '@interop/pws-client/paths'
+import { errorStatus } from '@interop/pws-client/sync'
 import { log } from '../log.js'
 
 /**
@@ -119,7 +119,7 @@ export class AudienceReader {
   readonly spaceUrl: string
   readonly #collectionId: string
   readonly #pageSize: number
-  readonly #was: WasClient
+  readonly #pws: PwsClient
   #zcap: IZcap
   #collection: Collection
   #checkpoint: ChangesCheckpoint | null
@@ -151,8 +151,8 @@ export class AudienceReader {
     this.spaceUrl = spaceUrl
     this.#collectionId = collectionId
     this.#zcap = zcap
-    this.#was = WasClient.forSpace({ spaceUrl, signer })
-    this.#collection = this.#was.fromCapability(zcap) as Collection
+    this.#pws = PwsClient.forSpace({ spaceUrl, signer })
+    this.#collection = this.#pws.fromCapability(zcap) as Collection
     this.#checkpoint = checkpoint
     this.#pageSize = pageSize
   }
@@ -266,7 +266,7 @@ export class AudienceReader {
       )
     }
     assertAllowsGet(zcap)
-    const collection = this.#was.fromCapability(zcap) as Collection
+    const collection = this.#pws.fromCapability(zcap) as Collection
     this.#zcap = zcap
     this.#collection = collection
     this.#generation += 1
@@ -343,7 +343,7 @@ export class AudienceReader {
     const changes: AudienceChange[] = []
     let reached = checkpoint
     try {
-      // was-client's walk drops every entry whose `kind` is not `resource`
+      // pws-client's walk drops every entry whose `kind` is not `resource`
       // (decision 0013), follows a page the filter emptied, ends only on a
       // null checkpoint, and fails on a checkpoint the server repeats.
       for await (const page of collection.resourceChanges({
@@ -471,7 +471,7 @@ export class AudienceReader {
       return
     }
     try {
-      await this.#was.request({
+      await this.#pws.request({
         capability: this.#zcap,
         url: collectionUrl({
           spaceUrl: this.spaceUrl,

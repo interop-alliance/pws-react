@@ -34,7 +34,7 @@ import {
   stampLww
 } from './storageManager.js'
 import { remotePayloadWins } from '@interop/social-core'
-import { lwwFields } from '@interop/was-sync'
+import { lwwFields } from '@interop/pws-sync'
 
 /**
  * What the persisted write verbs accept: the payload WITHOUT its last-write-wins
@@ -373,7 +373,7 @@ export function createEntityStore<T extends { id: string }>(
         schedulePendingFlush()
       },
       query: async ({ equals, limit, cursor }) => {
-        // Route the logical key to its WAS collection id through the local
+        // Route the logical key to its PWS collection id through the local
         // registry; the remote store validates visibility + declared indexes
         // and fails closed before any network round trip.
         const { id } = requireStore().collectionConfig(collectionKey)

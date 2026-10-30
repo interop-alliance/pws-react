@@ -27,18 +27,18 @@ import {
   startTestServer
 } from '@interop/web-spaces-server/testing'
 import {
-  WasClient,
+  PwsClient,
   type ActionInput,
   type Collection,
   type IDelegatedZcap,
   type ISigner,
   type IZcap
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   collectionUrl,
   rootCapability,
   rootCapabilityId
-} from '@interop/was-client/paths'
+} from '@interop/pws-client/paths'
 import { CapabilityAgent } from '@interop/capability-agent'
 import { captureLogger } from '@interop/logger'
 import { provisionDevGrants } from '../../src/dev/provisionDevGrants.js'
@@ -60,7 +60,7 @@ type TestServer = Awaited<ReturnType<typeof startTestServer>>
 let audienceServer: TestServer | undefined
 let appServer: TestServer | undefined
 let appServerUrl: string
-let owner: WasClient
+let owner: PwsClient
 let ownerDid: string
 let spaceUrl: string
 let signer: ISigner
@@ -89,7 +89,7 @@ beforeAll(async () => {
     keyName: 'owner-key'
   })
   ownerDid = ownerAgent.id
-  owner = WasClient.fromSigner({
+  owner = PwsClient.fromSigner({
     baseServerUrl: audienceServer.baseServerUrl,
     signer: ownerAgent.getSigner()
   })
@@ -366,7 +366,7 @@ describe('AudienceReader cut and resume', () => {
     await collection.put('p2', { postId: 'post-2' })
     const { result: cut, events } = await withCapturedLogs(() => reader.pull())
     expect(cut).toEqual({ changes: [], snapshot: false, paused: true })
-    // WAS masks a denial as a 404 and names the cause when the request
+    // PWS masks a denial as a 404 and names the cause when the request
     // itself verified.
     expect(events.map(event => [event.level, event.data?.cause])).toEqual([
       ['warn', 'CapabilityRevokedError']
@@ -417,7 +417,7 @@ describe('AudienceReader cut and resume', () => {
     expect(reader.paused).toBe(false)
 
     await owner.revoke(zcap)
-    // was-client answers the masked 404 of a body read as null; the reader
+    // pws-client answers the masked 404 of a body read as null; the reader
     // settles it against the container and pauses.
     expect(await reader.get('p1')).toBeUndefined()
     expect(reader.paused).toBe(true)

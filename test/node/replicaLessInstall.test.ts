@@ -7,7 +7,7 @@
  * absent. `rxdb` is an optional peer: the root entry imports nothing from it at
  * module evaluation, because `LocalStore` loads `rxdb` inside `init()` and
  * `removeDatabase()` and `SyncController` loads the driver subpath
- * (`@interop/was-sync/rxdb`, the one was-sync entry that imports `rxdb`) inside
+ * (`@interop/pws-sync/rxdb`, the one pws-sync entry that imports `rxdb`) inside
  * `start()`.
  *
  * The fixture stands in for a separate install: a resolver where every `rxdb`
@@ -28,7 +28,7 @@ describe('the replica-less install', () => {
     vi.doUnmock('rxdb/plugins/core')
     vi.doUnmock('rxdb/plugins/storage-dexie')
     vi.doUnmock('rxdb/plugins/replication')
-    vi.doUnmock('@interop/was-sync/rxdb')
+    vi.doUnmock('@interop/pws-sync/rxdb')
     vi.resetModules()
   })
 
@@ -38,7 +38,7 @@ describe('the replica-less install', () => {
     vi.doMock('rxdb/plugins/core', absent)
     vi.doMock('rxdb/plugins/storage-dexie', absent)
     vi.doMock('rxdb/plugins/replication', absent)
-    vi.doMock('@interop/was-sync/rxdb', absent)
+    vi.doMock('@interop/pws-sync/rxdb', absent)
 
     const { replicaLessSurface } = await import('../fixtures/replicaLessApp.js')
     expect(replicaLessSurface()).toContain('SharedCollectionReader')

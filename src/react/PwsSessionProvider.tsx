@@ -11,35 +11,35 @@
  * never rebuilt.
  */
 import { createContext, useEffect, useState, type ReactNode } from 'react'
-import type { StoreRegistry, WasAppConfig } from '../config.js'
-import { createAuthStore, type WasAuthStore } from '../session/authStore.js'
+import type { StoreRegistry, PwsAppConfig } from '../config.js'
+import { createAuthStore, type PwsAuthStore } from '../session/authStore.js'
 
 /**
  * The bound auth store, or `null` outside a provider. The `useAuthStore` hook
  * throws a helpful error on the `null` case.
  */
-export const WasSessionContext = createContext<WasAuthStore | null>(null)
+export const PwsSessionContext = createContext<PwsAuthStore | null>(null)
 
 /**
  * Provides the wallet-mode session store to the tree beneath it.
  *
  * @param props {object}
- * @param props.config {WasAppConfig}   the app-wide configuration
+ * @param props.config {PwsAppConfig}   the app-wide configuration
  * @param props.registry {StoreRegistry}   the per-collection hydrate/patch
  *   handlers
  * @param props.children {ReactNode}
  * @returns {ReactNode}
  */
-export function WasSessionProvider({
+export function PwsSessionProvider({
   config,
   registry,
   children
 }: {
-  config: WasAppConfig
+  config: PwsAppConfig
   registry: StoreRegistry
   children: ReactNode
 }): ReactNode {
-  const [store] = useState<WasAuthStore>(() =>
+  const [store] = useState<PwsAuthStore>(() =>
     createAuthStore({ config, registry })
   )
   // Kick off boot on mount (so a local-first app that never renders
@@ -59,8 +59,8 @@ export function WasSessionProvider({
     }
   }, [store])
   return (
-    <WasSessionContext.Provider value={store}>
+    <PwsSessionContext.Provider value={store}>
       {children}
-    </WasSessionContext.Provider>
+    </PwsSessionContext.Provider>
   )
 }

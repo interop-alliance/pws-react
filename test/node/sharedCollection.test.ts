@@ -17,14 +17,14 @@
  *
  * @vitest-environment node
  */
-import { isIntegrityError } from '@interop/was-client/sync'
+import { isIntegrityError } from '@interop/pws-client/sync'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ownerRecipient,
   UnverifiedDescriptorError,
   x25519RecipientFromDidKey
-} from '@interop/was-client/edv'
-import type { CollectionEncryption } from '@interop/was-client'
+} from '@interop/pws-client/edv'
+import type { CollectionEncryption } from '@interop/pws-client'
 import { fakeRemoteStore } from '../fixtures/remoteStore.js'
 import {
   corruptRecipientEntry,

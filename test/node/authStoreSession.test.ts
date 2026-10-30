@@ -4,7 +4,7 @@
 /**
  * Connected-session tests for the four-state machine: a real seed-derived
  * identity and a real (fake-indexeddb) LocalStore open, with the network edges
- * stubbed (`startWasSync` a no-op, `requestGrants` mocked per test). Covers:
+ * stubbed (`startPwsSync` a no-op, `requestGrants` mocked per test). Covers:
  *
  * - a failed connected activation falls back to a usable `local` replica (never
  *   dead-ends) and surfaces the open error;
@@ -24,11 +24,11 @@ import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import type { IZcap } from '@interop/data-integrity-core'
-import { IntegrityError } from '@interop/was-client/sync'
-import { rootCapabilityId } from '@interop/was-client/paths'
+import { IntegrityError } from '@interop/pws-client/sync'
+import { rootCapabilityId } from '@interop/pws-client/paths'
 import {
   createAuthStore,
-  type WasAuthStore
+  type PwsAuthStore
 } from '../../src/session/authStore.js'
 import {
   createDescriptorCache,
@@ -49,19 +49,19 @@ import { requestGrants } from '../../src/auth/loginFlow.js'
 import { parseGrants } from '../../src/grants.js'
 import {
   readRemoteDescriptors,
-  startWasSync
-} from '../../src/storage/wasSync.js'
+  startPwsSync
+} from '../../src/storage/pwsSync.js'
 import { hasStore, requireStore } from '../../src/storage/storageManager.js'
 import { StorageContext } from '../../src/storage/storageContext.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../../src/log.js'
-import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
+import type { StoreRegistry, PwsAppConfig } from '../../src/config.js'
 
 const SPACE_URL = 'http://localhost:3999/space/space-1/'
 
 // Replace the live replication bootstrap with an inert resolver.
-vi.mock('../../src/storage/wasSync.js', () => ({
-  startWasSync: vi.fn(async () => ({})),
+vi.mock('../../src/storage/pwsSync.js', () => ({
+  startPwsSync: vi.fn(async () => ({})),
   // The login-time descriptor read answers "no descriptor" (an unprovisioned
   // server); a read that FAILED would fail the activation instead.
   readRemoteDescriptors: vi.fn(async () => ({ descriptors: {}, failures: [] }))
@@ -75,10 +75,10 @@ vi.mock('../../src/auth/loginFlow.js', async importOriginal => {
 })
 
 const requestGrantsMock = vi.mocked(requestGrants)
-const startWasSyncMock = vi.mocked(startWasSync)
+const startPwsSyncMock = vi.mocked(startPwsSync)
 const readRemoteDescriptorsMock = vi.mocked(readRemoteDescriptors)
 
-function baseConfig(collections: { key: string; id: string }[]): WasAppConfig {
+function baseConfig(collections: { key: string; id: string }[]): PwsAppConfig {
   return {
     appName: 'Test App',
     appOrigin: 'http://localhost:5173',
@@ -161,7 +161,7 @@ function otherServerGrants(): IZcap[] {
 const FAR_FUTURE_MS = 4 * 60 * 60 * 1000
 
 // Track created stores so their expiry-watch intervals never outlive a test.
-const liveStores: WasAuthStore[] = []
+const liveStores: PwsAuthStore[] = []
 
 beforeEach(() => {
   requestGrantsMock.mockReset()
@@ -184,12 +184,12 @@ async function connectedStore({
   grants = noteGrants(),
   expires = futureIso(FAR_FUTURE_MS)
 }: {
-  config: WasAppConfig
+  config: PwsAppConfig
   seedStore: SeedStore
   registry?: StoreRegistry
   grants?: IZcap[]
   expires?: string
-}): Promise<{ store: WasAuthStore; seed: Uint8Array }> {
+}): Promise<{ store: PwsAuthStore; seed: Uint8Array }> {
   const seed = crypto.getRandomValues(new Uint8Array(32))
   await persistAppSession({
     session: await sessionRecord({ seed, grants, expires }),
@@ -347,7 +347,7 @@ describe('reconnect() storage-location continuity', () => {
     const { store } = await connectedStore({ config, seedStore })
     store.getState().notifyAccessExpired()
     expect(store.getState().status).toBe('reconnect')
-    const syncCalls = startWasSyncMock.mock.calls.length
+    const syncCalls = startPwsSyncMock.mock.calls.length
 
     // Internally consistent grants -- for somebody else's server.
     const grants = otherServerGrants()
@@ -363,7 +363,7 @@ describe('reconnect() storage-location continuity', () => {
     expect(store.getState().reconnecting).toBe(false)
     expect(store.getState().error).toMatch(/different Space/)
     // The session was never re-pointed: no replication against the new target.
-    expect(startWasSyncMock.mock.calls).toHaveLength(syncCalls)
+    expect(startPwsSyncMock.mock.calls).toHaveLength(syncCalls)
   })
 
   it('lands connected when the re-grant keeps the same topology', async () => {
@@ -371,7 +371,7 @@ describe('reconnect() storage-location continuity', () => {
     const seedStore = newSeedStore()
     const { store } = await connectedStore({ config, seedStore })
     store.getState().notifyAccessExpired()
-    const syncCalls = startWasSyncMock.mock.calls.length
+    const syncCalls = startPwsSyncMock.mock.calls.length
 
     const grants = noteGrants()
     const expires = futureIso(FAR_FUTURE_MS)
@@ -387,7 +387,7 @@ describe('reconnect() storage-location continuity', () => {
     expect(store.getState().error).toBeNull()
     expect(store.getState().expires).toBe(expires)
     // Replication restarted under the renewed grants.
-    expect(startWasSyncMock.mock.calls.length).toBe(syncCalls + 1)
+    expect(startPwsSyncMock.mock.calls.length).toBe(syncCalls + 1)
   })
 })
 
@@ -529,7 +529,7 @@ describe('boot() over an expired persisted session', () => {
       session: { ...session, expires: pastIso(1000) },
       store: seedStore
     })
-    const syncStartsBefore = startWasSyncMock.mock.calls.length
+    const syncStartsBefore = startPwsSyncMock.mock.calls.length
     const readsBefore = readRemoteDescriptorsMock.mock.calls.length
     const store = createAuthStore({ config, registry, seedStore })
     liveStores.push(store)
@@ -555,7 +555,7 @@ describe('boot() over an expired persisted session', () => {
     // Nothing was wiped and nothing invoked the expired grants.
     expect(await seedStore.loadSeed()).toEqual(seed)
     expect((await peekAppSession({ store: seedStore })).record).not.toBeNull()
-    expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore)
+    expect(startPwsSyncMock.mock.calls.length).toBe(syncStartsBefore)
   })
 
   it('opens a collection the cache does not cover fail-closed, with no live read', async () => {
@@ -655,7 +655,7 @@ describe('boot() over an expired persisted session', () => {
     expect((await peekAppSession({ store: seedStore })).record?.expires).toBe(
       expires
     )
-    expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore + 1)
+    expect(startPwsSyncMock.mock.calls.length).toBe(syncStartsBefore + 1)
     expect(await requireStore().listEntities('notes')).toHaveLength(1)
   })
 })
@@ -671,7 +671,7 @@ describe('reconnect() with the session torn down while the popup is open', () =>
     const { store } = await connectedStore({ config, seedStore })
     store.getState().notifyAccessExpired()
     expect(store.getState().status).toBe('reconnect')
-    const syncStartsBefore = startWasSyncMock.mock.calls.length
+    const syncStartsBefore = startPwsSyncMock.mock.calls.length
 
     let release!: () => void
     const popup = new Promise<void>(resolve => (release = resolve))
@@ -711,7 +711,7 @@ describe('reconnect() with the session torn down while the popup is open', () =>
     expect(store.getState().reconnecting).toBe(false)
     expect(store.getState().error).toBeNull()
     expect((await peekAppSession({ store: seedStore })).record).toBeNull()
-    expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore)
+    expect(startPwsSyncMock.mock.calls.length).toBe(syncStartsBefore)
     expect(hasStore()).toBe(true)
   })
 
@@ -731,7 +731,7 @@ describe('reconnect() with the session torn down while the popup is open', () =>
     expect(store.getState().reconnecting).toBe(false)
     expect(await seedStore.loadSeed()).toBeNull()
     expect((await peekAppSession({ store: seedStore })).record).toBeNull()
-    expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore)
+    expect(startPwsSyncMock.mock.calls.length).toBe(syncStartsBefore)
     expect(hasStore()).toBe(true)
   })
 
@@ -751,7 +751,7 @@ describe('reconnect() with the session torn down while the popup is open', () =>
     expect(store.getState().status).toBe('boot')
     expect(store.getState().reconnecting).toBe(false)
     expect(intervals).not.toHaveBeenCalled()
-    expect(startWasSyncMock.mock.calls.length).toBe(syncStartsBefore)
+    expect(startPwsSyncMock.mock.calls.length).toBe(syncStartsBefore)
     expect(hasStore()).toBe(false)
   })
 })

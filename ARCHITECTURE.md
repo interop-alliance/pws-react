@@ -8,7 +8,7 @@ agent-facing rules (toolchain, tests, repo-specific dos and don'ts) see
 
 ## Directory map
 
-- `src/config.ts` -- the central `WasAppConfig` + `StoreRegistry` contract: the
+- `src/config.ts` -- the central `PwsAppConfig` + `StoreRegistry` contract: the
   app identity (`appName`, `appOrigin`, `appUrl`), the `{ key, id }` collection
   registry the storage layer routes on, the separate read-only
   `sharedCollections` registry, the `onboarding` knob, the `seedLocal` fixtures
@@ -16,7 +16,7 @@ agent-facing rules (toolchain, tests, repo-specific dos and don'ts) see
   `validateSharedCollections` are the fail-closed registry checks the storage
   layer runs before any replica opens.
 - `src/grants.ts` -- parses granted zcaps into the one Space URL they are rooted
-  in and the per-collection routing (`ParsedGrants`), over was-client's own
+  in and the per-collection routing (`ParsedGrants`), over pws-client's own
   `spaceUrlOf` and `parseSpaceTarget`.
 - `src/identity/` -- seed-derived agents (`deriveIdentity`, which enforces the
   32-byte seed rule and yields the identity key-agreement key every encrypted
@@ -35,15 +35,15 @@ agent-facing rules (toolchain, tests, repo-specific dos and don'ts) see
   active-context pointer and its app-facing facades (`storageManager.ts`), the
   per-install `writerId` binding (`writerId.ts`), generic entity stores, the
   delegated remote store, the read-only `SharedCollectionReader`, the
-  replication bootstrap (`wasSync.ts`), the session's encryption-descriptor
+  replication bootstrap (`pwsSync.ts`), the session's encryption-descriptor
   policy (`descriptorManager.ts`), the governed descriptor acquisition
   (`governedDescriptors.ts`), the per-collection document cipher
-  (`docCipher.ts`) and the WAS sync port over it (`wasSyncPort.ts`), the sync
+  (`docCipher.ts`) and the PWS sync port over it (`pwsSyncPort.ts`), the sync
   controller binding, sync status, the local-to-connected adoption merge
   (`adopt.ts`), and the public share-URL helper (`publicUrl.ts`).
 
 The replication driver itself is not in this repo. It lives in
-`@interop/was-sync`: the changes-feed pull handler, the conditional-write push
+`@interop/pws-sync`: the changes-feed pull handler, the conditional-write push
 handler, the `replicateRxCollection` wiring, the synced-document schema, the
 conflict-handler seam, the writer-id mint, and the controller core. Its root
 entry carries no `rxdb`; the driver and the controller core are on its `./rxdb`
@@ -53,7 +53,7 @@ Zustand status store, and the browser bindings the core takes as ports.
 
 - `src/session/` -- the session auth store factory (`createAuthStore`): the
   four-state machine described below.
-- `src/react/` -- the `WasSessionProvider`, the hooks (`useSession`, `useLogin`,
+- `src/react/` -- the `PwsSessionProvider`, the hooks (`useSession`, `useLogin`,
   `useLogout`, `useClearData`, `useHasLocalData`, `useReconnect`,
   `useSharedCollection`, `useSyncStatus`), and the `defineDocumentApp` facade.
 - `src/mui/` -- optional MUI + react-router components (`ProtectedRoute`,
@@ -65,7 +65,7 @@ Zustand status store, and the browser bindings the core takes as ports.
 
 `createAuthStore` (`src/session/authStore.ts`) is a factory rather than a
 module-level store: the library cannot bind a store to an app's config, so the
-React provider calls it once with the app's `WasAppConfig` and `StoreRegistry`
+React provider calls it once with the app's `PwsAppConfig` and `StoreRegistry`
 and shares the returned vanilla zustand store through context. It owns the whole
 session lifecycle -- boot, login, the non-CHAPI `connectWithGrants` path,
 logout, clear-data, reconnect -- and the open/hydrate/sync ordering.
@@ -218,7 +218,7 @@ Everything a session's storage layer shares across its async consumers lives on
 one `StorageContext` (`src/storage/storageContext.ts`), created by
 `createAuthStore` beside the session store and exposed as
 `useAuthStore().getState().storageContext`: the open `LocalStore` replica, the
-connected session's `WasRemoteStore`, the resolved `writerId`, the sync status
+connected session's `PwsRemoteStore`, the resolved `writerId`, the sync status
 store, and the debounced re-hydrate timers. The auth store attaches and detaches
 the replica, the sync controller reports into the context's status store, and
 the per-doc change patches run on it. Nothing in the library reaches for a
@@ -314,7 +314,7 @@ and no expiry watch is armed on a torn-down store.
 ### `writerId`
 
 The per-install LWW attribution label, resolved once at store creation from
-`WasAppConfig.storageKeyPrefix` and exposed as `useSession().writerId`. It is an
+`PwsAppConfig.storageKeyPrefix` and exposed as `useSession().writerId`. It is an
 unkeyed, clearable, unrecoverable stamp whose only jobs are attribution and
 breaking last-write-wins ties -- never an identity. (The keyed client identity
 of an (app, user) pair is the app-key credential's subject DID.) Where
@@ -322,7 +322,7 @@ of an (app, user) pair is the app-key credential's subject DID.) Where
 remembers nothing: a shared module-level fallback would stamp one label into two
 accounts' histories in the same tab.
 
-The mint is `@interop/was-sync`'s, which takes the key prefix and the storage as
+The mint is `@interop/pws-sync`'s, which takes the key prefix and the storage as
 required inputs. `src/storage/writerId.ts` is the browser binding that supplies
 `DEFAULT_STORAGE_KEY_PREFIX` and `localStorage`, so `getWriterId` and
 `clearPersistedWriterId` keep their names and their optional-prefix signature.
@@ -343,12 +343,12 @@ adoption merge and the sync path write through, both of which own their stamping
 rules.
 
 The same label also travels on the wire. The session's `SyncController` hands
-`StorageContext.writerId` to the was-sync core as its writer-attribution label,
+`StorageContext.writerId` to the pws-sync core as its writer-attribution label,
 so every push declares it as the `Writer-Id` header. The pull side does not read
 the label: the pull handler decrypts nothing, so an echo of the replica's own
 write has no decrypt to skip. No second label is minted: the payload's LWW stamp
 and the header are two carriers of one value. The host learns from it how many
-installs of an app write for a user, which is the trade the WAS spec's
+installs of an app write for a user, which is the trade the PWS spec's
 writer-attribution section accepts and keeps optional.
 `sync.declareWriterId: false` withholds the wire carrier: pushes declare no
 label (which clears any the server held, under its declare-or-clear rule), while
@@ -360,7 +360,7 @@ Login is a single CHAPI `get`. `buildAppConnectVpr` emits a verifiable
 presentation request carrying a `DIDAuthentication` query plus exactly one
 `AppConnectQuery`:
 
-- `app: { name, appUrl }` -- `name` is `appName` from `WasAppConfig`, display
+- `app: { name, appUrl }` -- `name` is `appName` from `PwsAppConfig`, display
   metadata for the wallet's consent surface and never evidence of who is asking;
   `appUrl` is the application's canonical URL, which identifies it among the
   applications served from its origin. It must parse as an absolute URL, must
@@ -500,7 +500,7 @@ credential is `WalletUnsupportedError` (fail closed, "update Freewallet" copy).
 
 `checkGrants` enforces that every grant's `controller` is the connecting DID,
 that each carries an unexpired `expires`, that each `invocationTarget` is a
-single non-empty string parsing under the WAS URL template and naming a
+single non-empty string parsing under the PWS URL template and naming a
 collection (never the Space itself or a reserved sub-endpoint), that the whole
 set resolves to one host and one Space, and that every app-owned collection the
 app requested is covered with the actions it requires.
@@ -522,16 +522,16 @@ That check is structural. `controller` must equal the app's own DID,
 `invocationTarget` must name exactly one collection, and `expires` must be in
 the future. The grant's Space is read off its delegation chain's root: the chain
 of a Space-rooted capability starts at the Space's root capability, whose id
-encodes the Space URL (was-client's `spaceUrlOf`), and the target is classified
+encodes the Space URL (pws-client's `spaceUrlOf`), and the target is classified
 beneath that URL. Every grant in a set must root in the same Space. The Space
 URL the root names is taken as given, in whatever form. The spec's received-URL
 rule makes a Space URL a client receives authoritative, and a single fixed Space
 may live at any URL (an origin root, or a path with no base server URL above
 it), so no layout shape is checked here. Whether a chain roots exactly at the
 Space, rather than at a Collection beneath it, is the server's to decide at
-invocation; was-client's `spaceUrlOf` cannot tell the two apart and does not
+invocation; pws-client's `spaceUrlOf` cannot tell the two apart and does not
 try. A chain that roots in no Space at all surfaces as this module's own grant
-error, with was-client's `ValidationError` as `cause`. The Space is the only
+error, with pws-client's `ValidationError` as `cause`. The Space is the only
 thing read from the chain. Its links are not inspected: chain depth, the parent
 capability, and the delegator's DID form are deliberately left unchecked. A
 wallet may parent a grant on the Space root or on an intermediate delegation.
@@ -613,7 +613,7 @@ Three kinds, and the distinctions are load-bearing:
   `SharedCollectionReader`, which fetches the stored EDV envelope raw (the
   `encryption: 'plaintext'` handle override) and decrypts it locally.
 
-`SharedCollectionReader.list()` has two paths. The fast one is was-client's
+`SharedCollectionReader.list()` has two paths. The fast one is pws-client's
 `Collection.documents()` walk over the `changes` feed -- whole pages of
 documents with their bodies, undecrypted by the server, which is exactly what a
 reader holding its own keys wants, and the same primitive replication pulls
@@ -691,7 +691,7 @@ looks like). `IntegrityError` is deliberately not on that list. It has two
 sources. An envelope served under a resource id it was not sealed for is the
 server serving one document's content under another's URL. And a roster entry
 that names this app but whose wrapped epoch key fails its key-wrap check is a
-corrupt or tampered entry (was-client raises it for that since 0.99.1; a
+corrupt or tampered entry (the client raises it for that since 0.99.1; a
 malformed entry, or no entry at all, stays `KeyUnwrapError`). The write epoch's
 entry is checked when the cipher is built, so at open that error is rethrown as
 itself, ahead of `SharedCollectionUnavailableError`, like a descriptor refusal.
@@ -703,6 +703,15 @@ read as "not there". A listing skips it instead, logged at `error` rather than
 wallet-owned collection this app can neither repair nor route around unlistable.
 Every other failure -- no covering grant, no identity key supplied, not a
 recipient -- degrades one reader with a warning and never the session.
+
+An envelope whose binding the client does not admit is not on the skip list
+either. pws-client raises a bare `EncryptionError` for one that opens but
+carries no `pws` protected-header member (a writer on an earlier envelope
+format) or a scheme version newer than this client's. `get()` rethrows it. A
+listing skips the resource, logged at `error`, so one stale envelope leaves the
+rest readable, and rejects with that error when it decoded nothing. Answering
+`[]` there would make a wallet on another envelope format read as an empty
+collection rather than as a wallet or app needing an update.
 
 The other standing limit is the one the wallet states too: removing access stops
 future reads but cannot take back what has already been read.
@@ -722,18 +731,18 @@ one. A shared collection is encrypted, so that reader requires an `encryption`
 descriptor and builds a cipher from it; an audience is plaintext. A shared
 collection's fast path walks the POST form of the `changes` feed, which a GET
 and HEAD grant does not reach; the audience reader reads the read-only GET form.
-And a shared collection is resolved through the session's `WasRemoteStore`,
+And a shared collection is resolved through the session's `PwsRemoteStore`,
 which holds the one Space the app's own grants name; an audience lives in
 another owner's Space, possibly on another host, so
 `AudienceReader.open({ zcap, signer })` takes the zcap directly and builds its
 client on the Space the zcap's chain is rooted in (`spaceUrlOf`, through
-`WasClient.forSpace`, which holds a Space URL and nothing above it, so a Space
+`PwsClient.forSpace`, which holds a Space URL and nothing above it, so a Space
 served under any mount works). The zcap arrives from the subscription agent's
 own API, not in a wallet presentation, which is why `parseGrants` and
 `verifyResponse` know nothing about it.
 
 `pull()` follows the feed from the reader's checkpoint to the end, through
-was-client's `resourceChanges` walk, which drops every entry whose `kind` is not
+pws-client's `resourceChanges` walk, which drops every entry whose `kind` is not
 `resource`, follows a page the filter empties, ends only on a `null` checkpoint,
 and fails on a checkpoint the server repeats. A live JSON resource's body rides
 the feed inline and is returned as is; a tombstone is returned as
@@ -772,13 +781,13 @@ a stale denial still cuts the walk short, so the pull it ends is reported as
 partial: `snapshot` is `false` even on a replay or a listing read, since only a
 read that ran to its end is a full one.
 
-On the wire a denial is a 401 or 403, or the masked 404 WAS answers an
+On the wire a denial is a 401 or 403, or the masked 404 PWS answers an
 unauthorized caller with, named `capability-revoked` or `capability-expired`
 when the request itself verified and bare when the chain no longer verifies,
 which is what a collected generation looks like. All of those pause the reader.
 A collection deleted under the reader is the same 404 and pauses it the same
 way; it just never resumes. The feed request surfaces that 404 as a typed error,
-but was-client's body reads (`get`, `list`) answer `null` on any 404, the masked
+but pws-client's body reads (`get`, `list`) answer `null` on any 404, the masked
 denial included, so a null from one of them is ambiguous. A null listing on the
 fallback path is unambiguous, since an empty collection lists as empty rather
 than null, and is the cut. A null body (from `get()`, or for a resource the
@@ -789,18 +798,18 @@ miss, and a denial pauses the reader.
 ## Storage and sync
 
 `SyncController` (`src/storage/syncController.ts`) is the session binding over
-`createSyncController` from `@interop/was-sync/rxdb`. The core owns the
+`createSyncController` from `@interop/pws-sync/rxdb`. The core owns the
 lifecycle -- the serialized start/stop queue, one replication per collection,
 the status and auth-error callbacks, the poll timer, and the failed-bring-up
 unwind, which flags every collection and rethrows so the caller's bootstrap can
 surface it. The binding owns what is app-shaped: the port built from the
-session's `WasRemoteStore` and `LocalStore`, the two port flags this deployment
+session's `PwsRemoteStore` and `LocalStore`, the two port flags this deployment
 needs (`feedPrimaryRead`, because CORS hides the `GET` ETag cross-origin, and
 `mapAuthErrors`, without which `onAuthError` could never fire), the browser
-reachability source, the poll interval from `WasSyncConfig`, and the Zustand
+reachability source, the poll interval from `PwsSyncConfig`, and the Zustand
 status store the statuses are written into. The core delivers both the logical
-collection key and the WAS id to `onStatus`; the store is keyed on the logical
-key, since two registry entries may share one WAS id. A collection the grant set
+collection key and the PWS id to `onStatus`; the store is keyed on the logical
+key, since two registry entries may share one PWS id. A collection the grant set
 does not cover is flagged `error` and kept out of the port entirely, so an
 uncovered collection never draws a fail-closed 403 that reads as expired access.
 `stop()` is terminal for a core instance, so the binding builds a fresh core
@@ -810,16 +819,16 @@ inside `start()` and resets the status store on stop.
 Nothing reachable from `src/index.ts` imports `rxdb` at module evaluation:
 `LocalStore` loads `rxdb/plugins/core` and `rxdb/plugins/storage-dexie` inside
 `init()` and `removeDatabase()` (the default Dexie storage is loaded only when
-the caller supplies none), and `SyncController` loads `@interop/was-sync/rxdb`,
-the one was-sync entry that imports `rxdb`, inside `start()`. A replica-less app
-(login plus shared-collection reads, no `WasSessionProvider`) therefore installs
+the caller supplies none), and `SyncController` loads `@interop/pws-sync/rxdb`,
+the one pws-sync entry that imports `rxdb`, inside `start()`. A replica-less app
+(login plus shared-collection reads, no `PwsSessionProvider`) therefore installs
 without `rxdb`, and an app that replicates adds the peer explicitly; a missing
 peer surfaces at the first replica operation with the resolver's own error.
 Under Vite a declared optional peer that is not installed resolves to a stub
 that throws only when evaluated, which is what makes the lazy site the failure
 point rather than the import of this package. The core's `isAuthError` predicate
 is not re-exported from the root for the same reason; it is imported from
-`@interop/was-sync/rxdb`. The published declarations name no `rxdb` type either,
+`@interop/pws-sync/rxdb`. The published declarations name no `rxdb` type either,
 so that consumer type-checks the root without `skipLibCheck`: the `storage`
 injection option (`LocalStore.init`, `removeDatabase`, `createAuthStore`,
 `executeLocalWipe`) is typed as `ReplicaStorage`, the structural shape of RxDB's
@@ -830,7 +839,7 @@ event satisfies); and `LocalStore.rxCollection`, whose type is RxDB's, is
 `@internal` and stripped from the declarations (`stripInternal`), staying
 available to the sync controller and the tests.
 
-Every replica collection is declared on `@interop/was-sync`'s
+Every replica collection is declared on `@interop/pws-sync`'s
 `syncedDocSchema()`: a row is `{ id, updatedAt, data }` plus the optional
 members the server stamps on it (`updatedAtCounter`, `originId`, the nested
 `meta` stamp, `createdBy`, `writerId`, `epoch`, the `etag` / `metaEtag`
@@ -842,10 +851,10 @@ from the server.
 
 Each collection's RxDB conflict handler (installed at `addCollections` in
 `LocalStore.init`) settles a 412 push conflict by decrypting both sides and
-comparing payload `updatedAt` (writer id tiebreak) through was-sync's
-`makeLwwConflictHandler`. Its decrypt closure is was-client's own
+comparing payload `updatedAt` (writer id tiebreak) through pws-sync's
+`makeLwwConflictHandler`. Its decrypt closure is pws-client's own
 `DocCipher.decrypt` shape,
-`({ id, envelope, context? }) => Promise<Json | Blob>`. was-sync calls it once
+`({ id, envelope, context? }) => Promise<Json | Blob>`. pws-sync calls it once
 per side with that side's own `SyncedDoc.id`, the row's/resource's own stored
 id. The closure does not read an id out of the decrypted payload: the server
 controls that field, and on a private (random-id) collection it is a different,
@@ -853,7 +862,7 @@ logical uuid anyway. The cipher checks the envelope against the id it was given
 and raises `IntegrityError` on a mismatch (an envelope sealed for a different
 resource than the one it is read under), and raises the same error when the
 roster's entry for this app in the envelope's epoch fails its key-wrap check (a
-corrupt or tampered entry). was-sync keeps that separate from its
+corrupt or tampered entry). pws-sync keeps that separate from its
 undecryptable-side handling: on a private collection the error propagates out of
 conflict resolution, and the collection's replication cycle fails the same way
 any other fatal conflict-resolution error does, reported through `onStatus` as
@@ -875,9 +884,9 @@ that collection's replication permanently, since the server's body is unchanged
 on every retry. A private collection's `IntegrityError` propagates out of both
 paths unchanged.
 
-`startWasSync` (`src/storage/wasSync.ts`) is the replication bootstrap: given
+`startPwsSync` (`src/storage/pwsSync.ts`) is the replication bootstrap: given
 the parsed grant set and the invoking `ZcapClient` it builds the delegated
-`WasRemoteStore`, whose client is `WasClient.forSpace` over the grants' Space
+`PwsRemoteStore`, whose client is `PwsClient.forSpace` over the grants' Space
 URL (a grants-only app holds no base server URL and needs none of the
 id-addressed operations). A collection's `encryption` descriptor, its public
 `plaintext.indexes` declaration, and its encrypted `custom` envelope (where a
@@ -904,15 +913,15 @@ collection with no governing log stays fail-closed.
 Every collection that configures equality `indexes` then declares them, and
 where the declaration lives still depends on visibility. A public collection's
 declaration goes on the same object's plaintext `plaintext.indexes` member,
-through was-client's `Collection.configure`. It merges the change over the
+through pws-client's `Collection.configure`. It merges the change over the
 object already read, carries `name`, `custom`, and every member this client does
 not model forward, and pins the write to the read's validator. A lost race is
-re-read and rebased by was-client's own compare-and-swap; only a race lost
+re-read and rebased by pws-client's own compare-and-swap; only a race lost
 repeatedly is reported here, and the next session's pass repairs it. The
 declaration is skipped once the stored declaration already matches the
 configured list. A private collection declares its indexes as blinded-index
 attributes inside the object's encrypted `custom` envelope instead, through a
-compare-and-swap write (`declareBlindedIndexes`, over was-client's
+compare-and-swap write (`declareBlindedIndexes`, over pws-client's
 `Collection.declareIndexes`, one write for every missing attribute). The
 encrypted form is what lets every recipient discover what is queryable while the
 server never learns the attribute names. Only attributes missing from the
@@ -973,7 +982,7 @@ collection the grants cover, concurrently, each failure a warn-and-skip.
 ### The governed descriptor source
 
 Every `edv` descriptor this library adopts comes from one source,
-`WasRemoteStore.descriptorSource`: wallet-core's `logGovernedDescriptorSource`
+`PwsRemoteStore.descriptorSource`: wallet-core's `logGovernedDescriptorSource`
 over each collection's `meta/log`, invoked with that collection's own delegated
 zcap (the grant that reads the collection covers its log, so no second grant is
 needed). A read resolves the log's verified head, with the chain, the entry
@@ -1002,7 +1011,7 @@ becomes the `webvhResourceLogController` every collection-log read is verified
 against.
 
 Acquisition is written once, as `acquireGovernedDescriptor`
-(`src/storage/governedDescriptors.ts`): was-client's `acquireDescriptor` under
+(`src/storage/governedDescriptors.ts`): pws-client's `acquireDescriptor` under
 `requireGoverned`, which admits only a source declaring `verifiesHistory: true`
 and refuses any other with `UnverifiedDescriptorError` before asking it. The
 login-time read, the bootstrap's install, the local store's unknown-epoch
@@ -1059,7 +1068,7 @@ single-key fallback, and the adoption merge writes into the replica before sync
 starts. Public collections are excluded here: nothing on their Metadata object
 is needed before replication exists, so they are left to the bootstrap's own
 pass. Both this read and the bootstrap's per-collection pass run the same
-read-filter-cache logic, written once in `wasSync.ts` as
+read-filter-cache logic, written once in `pwsSync.ts` as
 `readGrantedEncryption`. It skips the ungranted collections, acquires each
 remaining private collection's descriptor through the governed source exactly
 once (reusing a descriptor the caller already acquired), and keeps only the
@@ -1073,7 +1082,7 @@ declaration reads the object again on its own, as noted above.
 
 A Metadata read has two distinct non-answers, and the pass keeps them apart. "No
 descriptor" is a fact about the collection: the governed source found no log, or
-the object read answered not-found (which is also how WAS answers an
+the object read answered not-found (which is also how PWS answers an
 unauthorized read), the backend has no metadata support, or the object carries
 no `encryption` member. `readCollectionMeta` answers `undefined` for exactly
 that. A read that fails for any other reason (a dropped connection, a 5xx) is
@@ -1126,7 +1135,7 @@ since a restore adopts nothing.
 
 `createDescriptorCache` (`src/identity/seedStore.ts`) presents the seed store's
 single persisted descriptor record as the `EncryptionDescriptorCache` seam
-`@interop/was-client/edv` acquires through. The blob is stamped with the
+`@interop/pws-client/edv` acquires through. The blob is stamped with the
 controller DID whose descriptors it holds, and a cache bound to a different
 controller reads it as empty and overwrites the stamp on its first write: a
 descriptor names an epoch roster a specific identity is a recipient of, so a
@@ -1148,7 +1157,7 @@ replica and this package's own tests use.
 `publicUrlFor({ collectionKey, id })` (`src/storage/publicUrl.ts`) composes the
 stable, world-readable resource URL of a document in a public (plaintext)
 collection -- the publish-copy share pattern. It routes the logical key to its
-WAS collection id through the active storage context, exactly as
+PWS collection id through the active storage context, exactly as
 `EntityStore.query` does, so it needs an open `LocalStore` and a
 wallet-connected session, and it fails closed on a non-public or unprovisioned
 collection or an empty id. The URL resolves publicly only once the document has
@@ -1173,7 +1182,7 @@ config, store registry, entity store -- for an app whose entire model is a
 single key-value document (an Excalidraw-style editor, a game save file), and
 returns a typed `useAppDocument` hook over it. The app never sees
 `createEntityStore`, grant parsing, or sync internals: it renders `doc`, calls
-`update`, and optionally offers file export/import (`was-document/v1` tagged
+`update`, and optionally offers file export/import (`pws-document/v1` tagged
 blobs) and a "Save to Web Spaces" `connect()`.
 
 It is a degenerate entity store: one collection holding one logical document

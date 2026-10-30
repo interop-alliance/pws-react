@@ -25,16 +25,16 @@ import { LocalStore } from '../../src/storage/localStore.js'
 import { createEntityStore } from '../../src/storage/entityStore.js'
 import { deactivateStorageContext } from '../../src/storage/storageManager.js'
 import { StorageContext } from '../../src/storage/storageContext.js'
-import { startWasSync } from '../../src/storage/wasSync.js'
+import { startPwsSync } from '../../src/storage/pwsSync.js'
 import { SyncController } from '../../src/storage/syncController.js'
 import { createSyncStatusStore } from '../../src/storage/syncStatusStore.js'
-import { WasRemoteStore } from '../../src/storage/wasRemoteStore.js'
+import { PwsRemoteStore } from '../../src/storage/pwsRemoteStore.js'
 import type { ZcapClient } from '@interop/ezcap'
 import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
-import type { WasCollectionConfig } from '../../src/config.js'
+import type { PwsCollectionConfig } from '../../src/config.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../../src/log.js'
 
@@ -49,7 +49,7 @@ const PRIVATE_ID = 'indexed-notes'
 // A second private collection, provisioned WITHOUT a blinding key: nothing to
 // install, so the bootstrap must not spend a metadata read on it.
 const PLAIN_ID = 'plain-notes'
-const REGISTRY: WasCollectionConfig[] = [
+const REGISTRY: PwsCollectionConfig[] = [
   { key: 'notes', id: PRIVATE_ID, indexes: ['title'] },
   { key: 'plain', id: PLAIN_ID }
 ]
@@ -88,7 +88,7 @@ let identityKeys: {
 }
 let localStore: LocalStore
 let syncController: SyncController
-let remoteStore: WasRemoteStore
+let remoteStore: PwsRemoteStore
 
 // Two notes share a title (for paging); the third is the negative control.
 const matching = [makeNote(SHARED_TITLE), makeNote(SHARED_TITLE)]
@@ -96,11 +96,11 @@ const other = makeNote('an unrelated title')
 
 /**
  * The collection handle every codec-path write and schema read goes through:
- * the remote store's own `WasClient`, whose keystore answers with this app's
+ * the remote store's own `PwsClient`, whose keystore answers with this app's
  * identity keys, invoking the collection's delegated zcap.
  */
 function collectionHandle() {
-  return remoteStore.was.spaceAt(remoteStore.spaceUrl).collection(PRIVATE_ID, {
+  return remoteStore.pws.spaceAt(remoteStore.spaceUrl).collection(PRIVATE_ID, {
     capability: remoteStore.collectionCapability(PRIVATE_ID)
   })
 }
@@ -146,7 +146,7 @@ beforeAll(async () => {
   })
   // The bootstrap is what declares the registry's index attributes into the
   // collection's encrypted metadata.
-  ;({ remoteStore } = await startWasSync({
+  ;({ remoteStore } = await startPwsSync({
     parsed,
     zcapClient,
     collections: REGISTRY,
@@ -280,20 +280,20 @@ describe('blinded-index query against web-spaces-server', () => {
     // it only for the collection whose declaration replaced `custom`. The
     // collection with no blinding key gets the pass read and nothing more.
     const order: string[] = []
-    const readMeta = WasRemoteStore.prototype.readCollectionMeta
+    const readMeta = PwsRemoteStore.prototype.readCollectionMeta
     const declared = vi
-      .spyOn(WasRemoteStore.prototype, 'declareBlindedIndexes')
+      .spyOn(PwsRemoteStore.prototype, 'declareBlindedIndexes')
       .mockImplementation(async function (
-        this: WasRemoteStore,
+        this: PwsRemoteStore,
         collectionId: string
       ) {
         order.push(`declare:${collectionId}`)
         return { collectionId, ok: true, wrote: true }
       })
     const read = vi
-      .spyOn(WasRemoteStore.prototype, 'readCollectionMeta')
+      .spyOn(PwsRemoteStore.prototype, 'readCollectionMeta')
       .mockImplementation(async function (
-        this: WasRemoteStore,
+        this: PwsRemoteStore,
         collectionId: string
       ) {
         order.push(`meta:${collectionId}`)
@@ -312,7 +312,7 @@ describe('blinded-index query against web-spaces-server', () => {
       dbName: 'blinded-index-bootstrap'
     })
     try {
-      await startWasSync({
+      await startPwsSync({
         parsed,
         zcapClient,
         collections: REGISTRY,
@@ -344,11 +344,11 @@ describe('blinded-index query against web-spaces-server', () => {
   it('warns and continues when the schema install fails', async () => {
     // The pass's read is genuine (the descriptor must be real); only the
     // envelope it carries is replaced with something the cipher cannot decode.
-    const readMeta = WasRemoteStore.prototype.readCollectionMeta
+    const readMeta = PwsRemoteStore.prototype.readCollectionMeta
     const read = vi
-      .spyOn(WasRemoteStore.prototype, 'readCollectionMeta')
+      .spyOn(PwsRemoteStore.prototype, 'readCollectionMeta')
       .mockImplementation(async function (
-        this: WasRemoteStore,
+        this: PwsRemoteStore,
         collectionId: string
       ) {
         const genuine = await readMeta.call(this, collectionId)
@@ -383,7 +383,7 @@ describe('blinded-index query against web-spaces-server', () => {
     try {
       // The bootstrap still resolves: the install is best-effort like every
       // other declaration on this pass.
-      const bootstrap = await startWasSync({
+      const bootstrap = await startPwsSync({
         parsed,
         zcapClient,
         collections: REGISTRY,

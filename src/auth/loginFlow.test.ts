@@ -15,7 +15,7 @@
  * and a user cancel (a null CHAPI response surfaces `LoginCancelledError`).
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { rootCapabilityId } from '@interop/was-client/paths'
+import { rootCapabilityId } from '@interop/pws-client/paths'
 import * as vc from '@interop/vc'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import { CapabilityAgent } from '@interop/capability-agent'

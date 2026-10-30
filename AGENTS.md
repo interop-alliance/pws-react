@@ -6,9 +6,9 @@
 Everything" (BYOE) client-side apps on Portable Web Spaces (PWS, formerly Wallet
 Attached Storage / WAS): DID-Auth login via a CHAPI wallet, a seed-derived
 did:key identity, local-first encrypted storage (an RxDB/Dexie replica of
-per-collection EDV envelopes), and background sync to a WAS server. It wraps
-`@interop/was-client` and was extracted from a production BYOE app. An app
-supplies a `WasAppConfig` and a `StoreRegistry` and owns its own domain and UI;
+per-collection EDV envelopes), and background sync to a PWS server. It wraps
+`@interop/pws-client` and was extracted from a production BYOE app. An app
+supplies a `PwsAppConfig` and a `StoreRegistry` and owns its own domain and UI;
 the library owns everything from login through sync.
 
 The directory map, the session state machine, the Login With Wallet (App
@@ -82,20 +82,20 @@ dependency that an app could reasonably own; prefer a peer.
 `rxdb` is an OPTIONAL peer too, with a different rule: the root entry may
 reference it, but only through a dynamic `import()` on an async path. Today
 those sites are `LocalStore.init` / `LocalStore.removeDatabase` (the two `rxdb`
-entry points) and `SyncController.start` (`@interop/was-sync/rxdb`, the one
-was-sync entry that imports `rxdb`). Type-only imports from `rxdb` are fine
+entry points) and `SyncController.start` (`@interop/pws-sync/rxdb`, the one
+pws-sync entry that imports `rxdb`). Type-only imports from `rxdb` are fine
 inside a module, but must not reach an exported signature: the published
 declarations name no `rxdb` type, so a replica-less consumer type-checks without
 `skipLibCheck`. Use `ReplicaStorage` / `ReplicaChange`
 (`src/storage/localStore.ts`) on public surfaces, or mark the member `@internal`
 (the build sets `stripInternal`). A static value import from `rxdb` or from
-`@interop/was-sync/rxdb` reachable from `src/index.ts` would make a replica-less
+`@interop/pws-sync/rxdb` reachable from `src/index.ts` would make a replica-less
 app fail to resolve the root; `pnpm run test:dist` greps `dist` for one (and the
 `.d.ts` files for any import of either), and
 `test/node/replicaLessInstall.test.ts` resolves the root under a resolver where
 every `rxdb` entry throws.
 
-`@interop/was-sync` (the WAS replication driver) stays an ordinary dependency.
+`@interop/pws-sync` (the PWS replication driver) stays an ordinary dependency.
 Its root entry is `rxdb`-free, and the root entry here value-imports it
 unconditionally (the logger forwarding in `src/log.ts`, `lwwFields`, and the
 `writerId` mint), none of which is replica-bound, so an optional peer would only

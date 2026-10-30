@@ -3,8 +3,8 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { IZcap } from '@interop/data-integrity-core'
-import { ValidationError } from '@interop/was-client'
-import { rootCapabilityId } from '@interop/was-client/paths'
+import { ValidationError } from '@interop/pws-client'
+import { rootCapabilityId } from '@interop/pws-client/paths'
 import { parseGrants, parseGrantTarget } from './grants.js'
 
 const SPACE_URL = 'http://localhost:3002/space/abc/'

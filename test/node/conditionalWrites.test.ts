@@ -7,12 +7,12 @@
  * REAL encrypted collection: a dev Space is provisioned with a private
  * (EDV-encrypted) collection, every pushed body is a genuine EDV envelope sealed
  * under the collection's key epoch, and the sync port is the one the sync
- * controller builds (`createWasSyncPort` wrapped in `withFeedPrimaryRead`).
+ * controller builds (`createPwsSyncPort` wrapped in `withFeedPrimaryRead`).
  *
  * The assumption under test, in one line: a write precondition APPLIES on an
  * encrypted collection, so a lost race answers `412` and `pushWrites` turns it
  * into an RxDB conflict entry carrying the current primary state. The fake-port
- * unit suite lives in `@interop/was-sync`; these tests
+ * unit suite lives in `@interop/pws-sync`; these tests
  * assert that a real encrypted collection actually produces the `412` the
  * mapping is written for.
  *
@@ -20,7 +20,7 @@
  * name this behavior: what 0.42.0 fixed is the CODEC-driven handle API
  * (`Resource.put({ ifMatch })`), which used to drop the caller's precondition
  * on an encrypted collection. Replication never travels that path -- the sync
- * port writes verbatim through `was.request()` with the precondition headers
+ * port writes verbatim through `pws.request()` with the precondition headers
  * set directly, and the server evaluates them without regard to encryption.
  * These tests are what establishes that, rather than leaving the two paths
  * conflated.
@@ -36,26 +36,27 @@ import type { WithDeleted } from 'rxdb/plugins/core'
 import { provisionDevGrants } from '../../src/dev/provisionDevGrants.js'
 import { parseGrants } from '../../src/grants.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
-import { WasRemoteStore } from '../../src/storage/wasRemoteStore.js'
+import { PwsRemoteStore } from '../../src/storage/pwsRemoteStore.js'
 import {
   makeLwwConflictHandler,
   type Json,
   type SyncedDoc,
-  type WasSyncPort
-} from '@interop/was-sync'
-import type { WriteAck } from '@interop/was-client/sync'
+  // pws-sync still exports this type under its former prefix.
+  type WasSyncPort as PwsSyncPort
+} from '@interop/pws-sync'
+import type { WriteAck } from '@interop/pws-client/sync'
 import {
   createPushHandler,
   withFeedPrimaryRead,
   type PushWriteAck
-} from '@interop/was-sync/rxdb'
-import { hasKeyEpochs } from '@interop/was-client/edv'
+} from '@interop/pws-sync/rxdb'
+import { hasKeyEpochs } from '@interop/pws-client/edv'
 import { createDocCipher, type DocCipher } from '../../src/storage/docCipher.js'
-import { createWasSyncPort } from '../../src/storage/wasSyncPort.js'
-import type { WasCollectionConfig } from '../../src/config.js'
+import { createPwsSyncPort } from '../../src/storage/pwsSyncPort.js'
+import type { PwsCollectionConfig } from '../../src/config.js'
 
 const PRIVATE_ID = 'conflict-notes'
-const REGISTRY: WasCollectionConfig[] = [{ key: 'notes', id: PRIVATE_ID }]
+const REGISTRY: PwsCollectionConfig[] = [{ key: 'notes', id: PRIVATE_ID }]
 
 // A fixed 32-byte app (relying party) master seed, distinct from the other
 // integration suites' so the two never share a provisioned Space.
@@ -84,9 +85,9 @@ interface Sealed {
 }
 
 let server: Awaited<ReturnType<typeof startTestServer>> | undefined
-let remoteStore: WasRemoteStore
+let remoteStore: PwsRemoteStore
 let cipher: DocCipher
-let port: WasSyncPort
+let port: PwsSyncPort
 
 beforeAll(async () => {
   // The server owns the temp backend, so closing it removes the data dir.
@@ -109,7 +110,7 @@ beforeAll(async () => {
   const { zcapClient, keyAgreementKey, keyResolver } = await deriveIdentity({
     seed: SEED
   })
-  remoteStore = WasRemoteStore.fromGrants({
+  remoteStore = PwsRemoteStore.fromGrants({
     parsed,
     zcapClient,
     collections: REGISTRY,
@@ -132,8 +133,8 @@ beforeAll(async () => {
 
   // The exact port the sync controller builds for a granted collection.
   port = withFeedPrimaryRead(
-    createWasSyncPort({
-      was: remoteStore.was,
+    createPwsSyncPort({
+      pws: remoteStore.pws,
       spaceUrl: remoteStore.spaceUrl,
       collectionId: PRIVATE_ID,
       capability: remoteStore.collectionCapability(PRIVATE_ID)!

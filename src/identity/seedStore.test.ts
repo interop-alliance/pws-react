@@ -9,7 +9,7 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import { createDescriptorCache, type SeedStore } from './seedStore.js'
 
 const controller = 'did:key:zAlice'

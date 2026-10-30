@@ -4,7 +4,7 @@
 
 > React library for building "Bring Your Own Everything" (BYOE) apps on Wallet
 > Attached Storage: DID-Auth login via a CHAPI wallet, local-first encrypted
-> storage, and background sync to a WAS server.
+> storage, and background sync to a PWS server.
 
 ## Table of Contents
 
@@ -25,25 +25,25 @@
 
 "Bring Your Own Everything" (BYOE) is a way to build web apps with no backend
 that the app owns. The user brings their own identity (a wallet) and their own
-storage (Wallet Attached Storage, WAS), and the app stores everything encrypted
-in that user-owned space. The app is a requester: the party (an app, service, or
+storage (Portable Web Spaces, PWS), and the app stores everything encrypted in
+that user-owned space. The app is a requester: the party (an app, service, or
 agent) that asks a wallet for grants. It authenticates via "Login With Wallet"
-(CHAPI) and reads and writes the user's WAS space using wallet-delegated
+(CHAPI) and reads and writes the user's PWS space using wallet-delegated
 authorization capabilities (zcaps). It never owns the space, never holds the
 wallet's root key, and invokes only the zcaps the wallet grants it.
 
 "Bring Your Own Storage" (BYOS) is the storage half of that model. Every
 application collection is encrypted client-side as an Encrypted Data Vault
-(EDV): the WAS server only ever sees opaque JWE envelopes and can neither read
+(EDV): the PWS server only ever sees opaque JWE envelopes and can neither read
 nor search the plaintext. Data is local-first -- a local RxDB (IndexedDB)
-database holds the encrypted envelopes and replicates them to WAS in the
+database holds the encrypted envelopes and replicates them to PWS in the
 background. The app works fully offline; sync resumes on reconnect.
 
 `@interop/was-react` is the reusable plumbing for that model, extracted from a
 production BYOE app. It wraps
-[`@interop/was-client`](https://npm.im/@interop/was-client) and owns identity
+[`@interop/pws-client`](https://npm.im/@interop/pws-client) and owns identity
 derivation, the CHAPI login flow, the session lifecycle store, the encrypted
-local replica, WAS replication, and a small set of React hooks and optional MUI
+local replica, PWS replication, and a small set of React hooks and optional MUI
 components. An app supplies its configuration, its collection registry, and its
 own domain and UI; the library owns everything in between.
 
@@ -63,10 +63,10 @@ pnpm add react zustand rxdb
 
 `react >= 19` and `zustand ^5` are required peers. `rxdb ^17.5` is an optional
 peer: every app that keeps a local replica (anything rendering
-`WasSessionProvider`) needs it, while an app that only reads wallet-owned shared
+`PwsSessionProvider`) needs it, while an app that only reads wallet-owned shared
 collections through `SharedCollectionReader` builds no replica and can leave it
 out. `LocalStore` and `SyncController` load `rxdb` (and the replication driver's
-`@interop/was-sync/rxdb` entry) on first use rather than at import, so the root
+`@interop/pws-sync/rxdb` entry) on first use rather than at import, so the root
 entry resolves without it; a missing `rxdb` surfaces at the first replica
 operation.
 
@@ -84,17 +84,17 @@ pnpm add @mui/material @mui/icons-material @emotion/react @emotion/styled react-
 
 ## Quick start
 
-An app builds one `WasAppConfig`, a `StoreRegistry` (per-collection hydrate and
-patch handlers), wraps its tree in `<WasSessionProvider>`, and drives the
+An app builds one `PwsAppConfig`, a `StoreRegistry` (per-collection hydrate and
+patch handlers), wraps its tree in `<PwsSessionProvider>`, and drives the
 session through the hooks. The example below wires a single `notes` collection.
 
 ### 1. Configuration
 
 ```ts
 // app.config.ts
-import type { WasAppConfig } from '@interop/was-react'
+import type { PwsAppConfig } from '@interop/was-react'
 
-export const config: WasAppConfig = {
+export const config: PwsAppConfig = {
   appName: 'Notes',
   appOrigin: 'https://notes.example',
   appUrl: 'https://notes.example/app',
@@ -103,7 +103,7 @@ export const config: WasAppConfig = {
 ```
 
 `collections` maps each app-side `key` (the local RxDB collection handle) to a
-WAS collection `id` (a deliberately unprefixed, generic name shared across
+PWS collection `id` (a deliberately unprefixed, generic name shared across
 interoperable apps). `appUrl` is this application's canonical URL -- absolute,
 fragment-less, and same-origin with the browser origin the app runs on -- and
 identifies it among the applications on that origin: the app-key identity is
@@ -122,7 +122,7 @@ bookkeeping fields `updatedAt` and `writerId` (`writerId` is a random
 per-install identifier, but still a linkability handle across a user's public
 documents). Changing a collection's visibility after first use is a
 data-migration event, not a config tweak: rows written in the other mode stop
-being readable. A registry that maps one WAS collection id to both visibilities
+being readable. A registry that maps one PWS collection id to both visibilities
 is rejected at store open. Two payload constraints on public collections: a
 top-level object-valued `jwe` field is reserved (the read path uses it to
 recognize a stray encrypted envelope and refuses the row), and rows carry the
@@ -164,8 +164,8 @@ const items = (await shared?.list()) ?? []
 const one = await shared?.get(items[0].id)
 ```
 
-`list()` reads the collection through was-client's `Collection.documents()` walk
-over the WAS `changes` feed, which returns whole pages of documents with their
+`list()` reads the collection through pws-client's `Collection.documents()` walk
+over the PWS `changes` feed, which returns whole pages of documents with their
 bodies -- and on an encrypted collection those bodies are the opaque EDV
 envelopes the reader wants, since the feed does not decrypt. That is one request
 per page rather than one per credential. The walk keeps only the feed's live
@@ -212,7 +212,7 @@ Every encrypted collection, shared or app-owned, is read through a verifying
 descriptor source: the collection's `meta/log`, checked against the Space
 owner's did:webvh account log (published world-readable in the Space's `id`
 collection). A collection with no governing log stays unreadable, and a source
-that does not verify is refused with was-client's `UnverifiedDescriptorError`,
+that does not verify is refused with pws-client's `UnverifiedDescriptorError`,
 surfaced as itself.
 
 #### Audiences
@@ -278,15 +278,15 @@ sync, and logout.
 
 ```tsx
 // main.tsx
-import { WasSessionProvider } from '@interop/was-react'
+import { PwsSessionProvider } from '@interop/was-react'
 import { config } from './app.config.js'
 import { registry } from './stores.js'
 
 export function Root() {
   return (
-    <WasSessionProvider config={config} registry={registry}>
+    <PwsSessionProvider config={config} registry={registry}>
       <App />
-    </WasSessionProvider>
+    </PwsSessionProvider>
   )
 }
 ```
@@ -417,7 +417,7 @@ are unavailable.
 
 The bootstrap also installs that persisted schema on the collection's own
 document cipher, so documents this app writes carry the same blinded index
-entries as a write through `@interop/was-client`'s `Collection.add` -- a
+entries as a write through `@interop/pws-client`'s `Collection.add` -- a
 document created or edited here is findable by an equality query, on this client
 and on every other recipient.
 
@@ -466,7 +466,7 @@ content-addressed ids (hashing immutable content so identical content shares one
 URL) are likewise an app-level choice.
 
 Anyone on the web can read the URL -- there is no auth. A consumer can fetch it
-with `WasClient.publicRead` from `@interop/was-client` or a plain GET. The URL
+with `PwsClient.publicRead` from `@interop/pws-client` or a plain GET. The URL
 resolves only after the document has synced to the server (a locally-inserted
 doc shares after the next sync push). Expiring or time-boxed share links are not
 supported: sharing IS public-collection membership, so a share lasts until the
@@ -509,7 +509,7 @@ a progress line (`connecting` to `verifying`):
    (`deriveIdentity`). The same seed yields the same identity on every device.
 7. **Check grants.** The delegated zcaps ride in the same presentation's
    top-level `zcap` array. `checkGrants` asserts every zcap is controlled by the
-   app DID, shares one space on a single WAS host, covers each configured
+   app DID, shares one space on a single PWS host, covers each configured
    collection's required actions, and is unexpired. A declined shared-collection
    grant never fails the login. The wallet decides where the user's Space lives;
    the sync layer derives its target from the grants. The wallet-provided
@@ -517,7 +517,7 @@ a progress line (`connecting` to `verifying`):
    `login()` promise resolves with.
 8. **Activate.** The session (seed, grants, earliest expiry) is persisted to
    IndexedDB, the encrypted local store is opened, the entity stores hydrate,
-   and background WAS sync starts.
+   and background PWS sync starts.
 
 ## Session lifecycle
 
@@ -571,16 +571,16 @@ Hooks:
   wallet writes into a roster when it shares one of its OWN collections. One key
   therefore reads everything this app touches (earlier versions derived a
   separate HKDF key per collection; see "One key identity" in ARCHITECTURE.md
-  for why that separation was given up). The WAS server never sees plaintext. A
+  for why that separation was given up). The PWS server never sees plaintext. A
   collection declared `visibility: 'public'` opts out entirely: payloads are
   stored plaintext (no key, no envelope) behind the same storage seam. A SHARED
   (wallet-owned) collection is outside the replica: it never replicates and has
   no local rows, and its envelopes are decrypted on demand with that same
   identity key through the collection's key-epoch roster.
 - **Replication.** A per-session `SyncController` runs RxDB replication per
-  collection over a `WasSyncPort` (signed requests authorized by the granted
-  zcaps). Pull is driven by the WAS `changes` feed; a low-frequency periodic
-  re-sync (`sync.pollMs`, default 15s) keeps open sessions converging.
+  collection over a sync port (signed requests authorized by the granted zcaps).
+  Pull is driven by the PWS `changes` feed; a low-frequency periodic re-sync
+  (`sync.pollMs`, default 15s) keeps open sessions converging.
 - **Conflict resolution.** Last-writer-wins on the payload's own
   `(updatedAt, writerId)` (ISO lexical compare, with a per-install random
   `writerId` tiebreaker). Updates re-encrypt in place under the same envelope id
@@ -590,7 +590,7 @@ Hooks:
   `error > syncing > synced`. The `SyncStatusChip` MUI component renders it. The
   underlying per-session status store (`storageContext.syncStatus` on the auth
   store's state) keys its `statuses` map by the registry's logical collection
-  `key`, like every other layer (two entries may share one WAS collection `id`,
+  `key`, like every other layer (two entries may share one PWS collection `id`,
   so the id is not a unique status key).
 
 ## Entry points
@@ -659,7 +659,7 @@ setLogger(createLogger('wr'))
 `setLogger` returns the previously installed logger, so a test can restore it in
 `afterEach`. `@interop/logger` is not a dependency of this package; any object
 with the four methods works. The call also installs the logger into
-`@interop/was-sync`, the replication driver this package runs on, so the
+`@interop/pws-sync`, the replication driver this package runs on, so the
 driver's diagnostics arrive under the same namespace.
 
 ## Dev tooling

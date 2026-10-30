@@ -29,9 +29,9 @@
  */
 import type {
   StoreRegistry,
-  WasAppConfig,
-  WasExpiryConfig,
-  WasSyncConfig
+  PwsAppConfig,
+  PwsExpiryConfig,
+  PwsSyncConfig
 } from '../config.js'
 import type { SessionStatus } from '../session/authStore.js'
 import { createEntityStore } from '../storage/entityStore.js'
@@ -52,7 +52,7 @@ const DOCUMENT_ID = 'main'
 /**
  * The `format` tag stamped into (and required of) export files.
  */
-export const DOCUMENT_EXPORT_FORMAT = 'was-document/v1'
+export const DOCUMENT_EXPORT_FORMAT = 'pws-document/v1'
 
 /**
  * The at-rest row shape: the app's document wrapped beside the LWW fields the
@@ -67,16 +67,16 @@ interface StoredDocument<T> {
 
 /**
  * Everything `defineDocumentApp` hands back: the config + registry to spread
- * into `WasSessionProvider`, and the typed document hook for components.
+ * into `PwsSessionProvider`, and the typed document hook for components.
  */
 export interface DocumentApp<T extends object> {
   /**
    * The app-wide was-react configuration (one sandbox collection,
-   * local-first onboarding). Pass to `WasSessionProvider`.
+   * local-first onboarding). Pass to `PwsSessionProvider`.
    */
-  config: WasAppConfig
+  config: PwsAppConfig
   /**
-   * The singleton-document store registry. Pass to `WasSessionProvider`.
+   * The singleton-document store registry. Pass to `PwsSessionProvider`.
    */
   registry: StoreRegistry
   /**
@@ -114,7 +114,7 @@ export interface DocumentApp<T extends object> {
     exportFile: () => Promise<Blob>
     /**
      * Replace the document with one previously exported via `exportFile`.
-     * Rejects when the file is not a `was-document/v1` export.
+     * Rejects when the file is not a `pws-document/v1` export.
      */
     importFile: (file: File) => Promise<void>
     /**
@@ -143,7 +143,7 @@ export interface DocumentApp<T extends object> {
 }
 
 /**
- * Builds the complete wiring for a one-document app: a `WasAppConfig` with a
+ * Builds the complete wiring for a one-document app: a `PwsAppConfig` with a
  * single sandbox collection and local-first onboarding, the singleton-document
  * store registry, and the typed `useAppDocument` hook bound to both.
  *
@@ -153,12 +153,12 @@ export interface DocumentApp<T extends object> {
  * @param options.appUrl {string}   this app's canonical URL (absolute,
  *   query- and fragment-less, same-origin with `appOrigin`)
  * @param [options.mediatorBase] {string}   CHAPI mediator base URL
- * @param options.document {object}   `collectionId` (the WAS sandbox
+ * @param options.document {object}   `collectionId` (the PWS sandbox
  *   collection id) and `initial` (the document value before the first write)
  * @param [options.dbName] {string}   local database base name
  * @param [options.storageKeyPrefix] {string}   localStorage key prefix
- * @param [options.sync] {WasSyncConfig}   replication tuning
- * @param [options.expiry] {WasExpiryConfig}   near-expiry warning tuning
+ * @param [options.sync] {PwsSyncConfig}   replication tuning
+ * @param [options.expiry] {PwsExpiryConfig}   near-expiry warning tuning
  * @returns {DocumentApp<T>}
  */
 export function defineDocumentApp<T extends object>({
@@ -179,13 +179,13 @@ export function defineDocumentApp<T extends object>({
   document: { collectionId: string; initial: T }
   dbName?: string
   storageKeyPrefix?: string
-  sync?: WasSyncConfig
-  expiry?: WasExpiryConfig
+  sync?: PwsSyncConfig
+  expiry?: PwsExpiryConfig
 }): DocumentApp<T> {
   const { collectionId, initial } = document
   const docStore = createEntityStore<StoredDocument<T>>(DOCUMENT_COLLECTION_KEY)
 
-  const config: WasAppConfig = {
+  const config: PwsAppConfig = {
     appName,
     appOrigin,
     appUrl,

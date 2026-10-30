@@ -21,7 +21,7 @@ import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { WasSessionContext } from '../../src/react/WasSessionProvider.js'
+import { PwsSessionContext } from '../../src/react/PwsSessionProvider.js'
 import {
   defineDocumentApp,
   DOCUMENT_COLLECTION_KEY,
@@ -29,7 +29,7 @@ import {
 } from '../../src/react/documentApp.js'
 import {
   createAuthStore,
-  type WasAuthStore
+  type PwsAuthStore
 } from '../../src/session/authStore.js'
 import type { LocalStore } from '../../src/storage/localStore.js'
 
@@ -64,7 +64,7 @@ function fakeLocalStore() {
   }
 }
 
-const liveStores: WasAuthStore[] = []
+const liveStores: PwsAuthStore[] = []
 
 /**
  * A fresh facade + session store, driven to `local` directly (no boot: the
@@ -107,12 +107,12 @@ function fileOf(content: string): File {
   return { text: async () => content } as unknown as File
 }
 
-function wrapperFor(store: WasAuthStore) {
+function wrapperFor(store: PwsAuthStore) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <WasSessionContext.Provider value={store}>
+      <PwsSessionContext.Provider value={store}>
         {children}
-      </WasSessionContext.Provider>
+      </PwsSessionContext.Provider>
     )
   }
 }
@@ -334,7 +334,7 @@ describe('useAppDocument', () => {
       JSON.stringify({ format: 'something-else', document: { score: 1 } })
     )
     await expect(result.current.importFile(wrongFormat)).rejects.toThrow(
-      /was-document\/v1/
+      /pws-document\/v1/
     )
     // The held document is untouched by either failure.
     expect(result.current.doc).toEqual(INITIAL)

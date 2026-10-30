@@ -3,15 +3,15 @@
  */
 /**
  * SyncController: this library's session binding over the replication
- * controller core in `@interop/was-sync/rxdb`.
+ * controller core in `@interop/pws-sync/rxdb`.
  *
  * The core owns the lifecycle -- the serialized start/stop queue, one
  * `replicateRxCollection` state machine per collection, the per-collection
  * capability skip, the status and auth-error callbacks, the poll timer, and the
  * failed-bring-up unwind. What this binding owns is everything app-shaped: the
- * port built from the session's {@link WasRemoteStore} and {@link LocalStore},
+ * port built from the session's {@link PwsRemoteStore} and {@link LocalStore},
  * the browser reachability source, the poll interval from the app's
- * {@link WasSyncConfig}, the session's `writerId` handed to the core as its
+ * {@link PwsSyncConfig}, the session's `writerId` handed to the core as its
  * writer-attribution label (unless the config's `declareWriterId` opts out),
  * and the Zustand {@link SyncStatusStore} the statuses are written into (keyed
  * by the registry's LOGICAL collection key, which is the first argument the
@@ -22,18 +22,18 @@
  * `start()` and resets the status store on stop.
  *
  * The core's `isAuthError` predicate is not re-exported here: import it from
- * `@interop/was-sync/rxdb`, which this module itself only loads inside
+ * `@interop/pws-sync/rxdb`, which this module itself only loads inside
  * `start()`.
  */
-import type { SyncController as SyncControllerCore } from '@interop/was-sync/rxdb'
+import type { SyncController as SyncControllerCore } from '@interop/pws-sync/rxdb'
 import type { IZcap } from '@interop/data-integrity-core'
 import {
   DEFAULT_SYNC_POLL_MS,
-  type WasCollectionConfig,
-  type WasSyncConfig
+  type PwsCollectionConfig,
+  type PwsSyncConfig
 } from '../config.js'
 import type { LocalStore, ReplicaChange } from './localStore.js'
-import type { WasRemoteStore } from './wasRemoteStore.js'
+import type { PwsRemoteStore } from './pwsRemoteStore.js'
 import type { SyncStatusStore } from './syncStatusStore.js'
 import { log } from '../log.js'
 
@@ -65,8 +65,8 @@ function browserOnlineSource(): {
  * A per-session controller around background replication.
  */
 export class SyncController {
-  #collections: WasCollectionConfig[]
-  #sync: WasSyncConfig
+  #collections: PwsCollectionConfig[]
+  #sync: PwsSyncConfig
   #syncStatus: SyncStatusStore
   #writerId?: string
   #core?: SyncControllerCore
@@ -74,14 +74,14 @@ export class SyncController {
 
   /**
    * @param options {object}
-   * @param options.collections {WasCollectionConfig[]}
+   * @param options.collections {PwsCollectionConfig[]}
    * @param options.syncStatus {SyncStatusStore}   the session's per-collection
    *   status store this controller reports into
    * @param [options.writerId] {string}   the session's resolved writer id
    *   (`StorageContext.writerId`, the same label the payloads are stamped
    *   with); declared on every push as `Writer-Id` unless
    *   `sync.declareWriterId` is `false`
-   * @param [options.sync] {WasSyncConfig}
+   * @param [options.sync] {PwsSyncConfig}
    */
   constructor({
     collections,
@@ -89,10 +89,10 @@ export class SyncController {
     writerId,
     sync
   }: {
-    collections: WasCollectionConfig[]
+    collections: PwsCollectionConfig[]
     syncStatus: SyncStatusStore
     writerId?: string
-    sync?: WasSyncConfig
+    sync?: PwsSyncConfig
   }) {
     this.#collections = collections
     this.#syncStatus = syncStatus
@@ -110,7 +110,7 @@ export class SyncController {
    * so the caller's bootstrap can surface it.
    *
    * @param options {object}
-   * @param options.remoteStore {WasRemoteStore}
+   * @param options.remoteStore {PwsRemoteStore}
    * @param options.localStore {LocalStore}
    * @param [options.onRemoteChange] {(collectionKey: string, change: ReplicaChange) => void}
    *   fired per replica change (pull or conflict-resolved push) for reactive
@@ -125,7 +125,7 @@ export class SyncController {
     onRemoteChange,
     onAuthError
   }: {
-    remoteStore: WasRemoteStore
+    remoteStore: PwsRemoteStore
     localStore: LocalStore
     onRemoteChange?: (collectionKey: string, change: ReplicaChange) => void
     onAuthError?: () => void
@@ -155,11 +155,11 @@ export class SyncController {
       }
       covered.push({ key, id, capability })
     }
-    // The driver subpath is the one `@interop/was-sync` entry that imports
+    // The driver subpath is the one `@interop/pws-sync` entry that imports
     // `rxdb`, an optional peer here. Loading it at the first `start()` rather
     // than at module evaluation is what lets a replica-less app resolve this
     // package's root entry with `rxdb` absent.
-    const { createSyncController } = await import('@interop/was-sync/rxdb')
+    const { createSyncController } = await import('@interop/pws-sync/rxdb')
     // The import is a suspension the guard above did not cover: a `stop()`
     // (or a second `start()`) that landed meanwhile must win, or replication
     // would start on a controller its owner already stopped.
@@ -168,7 +168,7 @@ export class SyncController {
     }
     this.#core = createSyncController({
       port: {
-        wasClient: remoteStore.was,
+        wasClient: remoteStore.pws,
         spaceUrl: remoteStore.spaceUrl,
         collections: covered,
         rxCollection: key => localStore.rxCollection(key),
@@ -187,9 +187,9 @@ export class SyncController {
           retryTime: this.#sync.retryMs
         })
       },
-      // The core delivers the logical key first and the WAS id second; the
+      // The core delivers the logical key first and the PWS id second; the
       // status store is keyed on the logical key, since two registry entries
-      // may share one WAS id. An `IntegrityError` out of the LWW conflict
+      // may share one PWS id. An `IntegrityError` out of the LWW conflict
       // handler's decrypt closure reports here as `error` too, through no
       // special case of its own.
       onStatus: (key, _collectionId, status) => setStatus(key, status),

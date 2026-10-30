@@ -18,10 +18,10 @@
  * down) is inert and is replaced without complaint, which is what a React
  * dev-mode double `useState` initializer or a test's sequence of stores needs.
  */
-import type { LwwFields } from '@interop/was-sync'
+import type { LwwFields } from '@interop/pws-sync'
 import type { LocalStore } from './localStore.js'
 import type { StorageContext } from './storageContext.js'
-import type { WasRemoteStore } from './wasRemoteStore.js'
+import type { PwsRemoteStore } from './pwsRemoteStore.js'
 
 let active: StorageContext | null = null
 
@@ -120,9 +120,9 @@ export function hasStore(): boolean {
  * The active session's remote store, or throws while no wallet-connected
  * session is active.
  *
- * @returns {WasRemoteStore}
+ * @returns {PwsRemoteStore}
  */
-export function requireRemoteStore(): WasRemoteStore {
+export function requireRemoteStore(): PwsRemoteStore {
   return requireStorageContext().requireRemoteStore()
 }
 

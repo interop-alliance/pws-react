@@ -6,7 +6,7 @@
  * Framework-only (no MUI / router); the optional MUI components live under the
  * `./mui` subpath.
  */
-export { WasSessionProvider, WasSessionContext } from './WasSessionProvider.js'
+export { PwsSessionProvider, PwsSessionContext } from './PwsSessionProvider.js'
 export {
   useAuthStore,
   useSession,

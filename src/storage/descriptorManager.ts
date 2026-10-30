@@ -15,14 +15,14 @@
  * collections fail-closed (epoch-from-birth has no single-key fallback) and is
  * warned about, rather than failing the session.
  */
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import type { SpaceTrust } from './spaceTrust.js'
 import { mintRecordEncryption } from '@interop/wallet-core/keyring'
-import { isPublicCollection, type WasCollectionConfig } from '../config.js'
+import { isPublicCollection, type PwsCollectionConfig } from '../config.js'
 import type { IdentityAgents } from '../identity/agents.js'
 import { createDescriptorCache, type SeedStore } from '../identity/seedStore.js'
 import type { ParsedGrants } from '../grants.js'
-import { readRemoteDescriptors } from './wasSync.js'
+import { readRemoteDescriptors } from './pwsSync.js'
 import { log } from '../log.js'
 
 /**
@@ -55,7 +55,7 @@ export interface DescriptorManager {
  * Builds the descriptor manager for one app session.
  *
  * @param options {object}
- * @param options.collections {WasCollectionConfig[]}   the app-owned collection
+ * @param options.collections {PwsCollectionConfig[]}   the app-owned collection
  *   registry (public collections carry no descriptor)
  * @param options.sessionStore {SeedStore}   the connected session's persistence,
  *   holding the offline descriptor cache
@@ -68,12 +68,12 @@ export function createDescriptorManager({
   sessionStore,
   anonStore
 }: {
-  collections: WasCollectionConfig[]
+  collections: PwsCollectionConfig[]
   sessionStore: SeedStore
   anonStore: SeedStore
 }): DescriptorManager {
   // The offline encryption-descriptor cache, presented as the seam
-  // `@interop/was-client/edv` acquires through. Reads serve the
+  // `@interop/pws-client/edv` acquires through. Reads serve the
   // connected replica's epoch-aware open (cache-only, no network); writes land
   // the descriptors the sync bootstrap fetched. Bound per controller DID at
   // each use: a login under a different controller than the one that cached
@@ -135,7 +135,7 @@ export function createDescriptorManager({
 
   /**
    * Loads the cached encryption descriptors for the registered collections
-   * (keyed by WAS collection id), or `undefined` when none are cached.
+   * (keyed by PWS collection id), or `undefined` when none are cached.
    *
    * Read CACHE-ONLY -- one read of the stored blob, filtered to the registered
    * collections -- because this runs before any remote store exists and must

@@ -15,8 +15,8 @@ import {
   composeVp,
   mintAppKeyCredential
 } from '@interop/wallet-request'
-import { agentsFromSeed } from '@interop/was-client/identity'
-import { rootCapabilityId } from '@interop/was-client/paths'
+import { agentsFromSeed } from '@interop/pws-client/identity'
+import { rootCapabilityId } from '@interop/pws-client/paths'
 import type {
   IVerifiableCredential,
   IVerifiablePresentation,

@@ -18,7 +18,7 @@
  * 3. Grant structure: every zcap is controlled by OUR seed-derived DID, carries
  *    a single non-empty string `invocationTarget`, targets a collection (never
  *    the Space itself or a reserved sub-endpoint) in a single space on a single
- *    WAS host, is unexpired, and the collection set is fully covered with
+ *    PWS host, is unexpired, and the collection set is fully covered with
  *    sufficient actions -- where "sufficient" is capped at each collection
  *    class's allowed actions (the App Connect spec's "Allowed actions" table).
  *    Both collection classes allow the full vocabulary today, so the cap bounds
@@ -196,7 +196,7 @@ function actionsOf(zcap: IZcap): string[] {
  * @param options.grants {IZcap[]}
  * @param options.controllerDid {string}   this app's seed-derived DID
  * @param options.collections {GrantRequestCollection[]}   the collections that
- *   must be covered (WAS collection id + visibility; the visibility selects
+ *   must be covered (PWS collection id + visibility; the visibility selects
  *   the class's allowed actions the required actions are capped at)
  * @param [options.requiredActions] {string[]}   the actions each collection
  *   grant must allow, capped per collection at its class's allowed actions

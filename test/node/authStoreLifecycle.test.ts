@@ -26,7 +26,7 @@ import { dbCount, type RxStorage } from 'rxdb/plugins/core'
 import type { IZcap } from '@interop/data-integrity-core'
 import {
   createAuthStore,
-  type WasAuthStore
+  type PwsAuthStore
 } from '../../src/session/authStore.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import {
@@ -48,14 +48,14 @@ import {
   dbNameForController,
   LocalStore
 } from '../../src/storage/localStore.js'
-import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
+import type { StoreRegistry, PwsAppConfig } from '../../src/config.js'
 
 const SPACE_URL = 'http://localhost:3999/space/space-1/'
-import { rootCapabilityId } from '@interop/was-client/paths'
+import { rootCapabilityId } from '@interop/pws-client/paths'
 
 // Inert replication: the lifecycle logic runs without any network machinery.
-vi.mock('../../src/storage/wasSync.js', () => ({
-  startWasSync: vi.fn(async () => ({})),
+vi.mock('../../src/storage/pwsSync.js', () => ({
+  startPwsSync: vi.fn(async () => ({})),
   // The login-time descriptor read answers "no descriptor" (an unprovisioned
   // server); a read that FAILED would fail the activation instead.
   readRemoteDescriptors: vi.fn(async () => ({ descriptors: {}, failures: [] }))
@@ -63,7 +63,7 @@ vi.mock('../../src/storage/wasSync.js', () => ({
 
 const registry: StoreRegistry = {}
 
-function baseConfig(): WasAppConfig {
+function baseConfig(): PwsAppConfig {
   return {
     appName: 'Test App',
     appOrigin: 'http://localhost:5173',
@@ -117,13 +117,13 @@ function gatedStorage(): {
 }
 
 // Track created stores so their expiry-watch intervals never outlive a test.
-const liveStores: WasAuthStore[] = []
+const liveStores: PwsAuthStore[] = []
 
 function makeStore(
-  config: WasAppConfig,
+  config: PwsAppConfig,
   seedStore: SeedStore,
   storage?: RxStorage<unknown, unknown>
-): WasAuthStore {
+): PwsAuthStore {
   const store = createAuthStore({
     config,
     registry,
@@ -317,7 +317,7 @@ describe('serialized boot/destroy lifecycle', () => {
   })
 
   it('a keyed provider remount never resolves the retired session once it is torn down', async () => {
-    // The keyed `<WasSessionProvider key=...>` shape: the new store is minted
+    // The keyed `<PwsSessionProvider key=...>` shape: the new store is minted
     // (render-phase `useState`) while the old replica is still attached, so its
     // creation-time claim is skipped; then the old provider's cleanup fires
     // `destroy` and the new one's effect fires `boot`, on two independent

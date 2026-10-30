@@ -5,7 +5,7 @@
  * The session-scoped storage context: everything a session's storage layer
  * shares across its async consumers, bound to one store registry and owned by
  * one session auth store. It holds the open {@link LocalStore} replica, the
- * connected session's {@link WasRemoteStore}, the per-install writer id the
+ * connected session's {@link PwsRemoteStore}, the per-install writer id the
  * write verbs stamp with, the sync status store, and the debounced re-hydrate
  * timers -- the values that used to be module globals, so that two providers
  * in one process no longer clobber each other and a consumer never has to
@@ -21,7 +21,7 @@
  */
 import { uuidv7 } from 'uuidv7'
 import type { StoreRegistry } from '../config.js'
-import type { Json, LwwFields } from '@interop/was-sync'
+import type { Json, LwwFields } from '@interop/pws-sync'
 import type { LocalStore } from './localStore.js'
 import {
   activateStorageContext,
@@ -31,7 +31,7 @@ import {
   createSyncStatusStore,
   type SyncStatusStore
 } from './syncStatusStore.js'
-import type { WasRemoteStore } from './wasRemoteStore.js'
+import type { PwsRemoteStore } from './pwsRemoteStore.js'
 
 /**
  * The debounce window coalescing a pull burst into one re-hydrate.
@@ -50,7 +50,7 @@ export class StorageContext {
   readonly syncStatus: SyncStatusStore = createSyncStatusStore()
   #writerId: string
   #localStore: LocalStore | null = null
-  #remoteStore: WasRemoteStore | null = null
+  #remoteStore: PwsRemoteStore | null = null
   #generation = 0
   /**
    * The replica swap in progress (a connect transition), if any: the writes
@@ -279,10 +279,10 @@ export class StorageContext {
    * Installs the connected session's delegated remote store (once background
    * sync has bootstrapped it from the granted zcaps).
    *
-   * @param store {WasRemoteStore}
+   * @param store {PwsRemoteStore}
    * @returns {void}
    */
-  attachRemoteStore(store: WasRemoteStore): void {
+  attachRemoteStore(store: PwsRemoteStore): void {
     this.#remoteStore = store
   }
 
@@ -308,12 +308,12 @@ export class StorageContext {
    * The connected session's remote store, or throws while no wallet-connected
    * session is active (local-only mode, or sync has not bootstrapped yet).
    *
-   * @returns {WasRemoteStore}
+   * @returns {PwsRemoteStore}
    */
-  requireRemoteStore(): WasRemoteStore {
+  requireRemoteStore(): PwsRemoteStore {
     if (!this.#remoteStore) {
       throw new Error(
-        'No WAS remote store is available; connect a wallet session first.'
+        'No PWS remote store is available; connect a wallet session first.'
       )
     }
     return this.#remoteStore

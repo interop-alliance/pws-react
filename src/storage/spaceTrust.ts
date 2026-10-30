@@ -3,7 +3,7 @@
  */
 /**
  * What every governed log read of one connected activation checks against,
- * held once per Space rather than once per `WasRemoteStore`: the Space
+ * held once per Space rather than once per `PwsRemoteStore`: the Space
  * owner's verified did:webvh controller view ({@link resolveSpaceOwner}, one
  * fetch and one log verification), and the chain-head pins continuity is
  * checked against. An activation builds more than one store over the same

@@ -2,15 +2,15 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The `WasRemoteStore` stand-in shared by the shared-collection and
+ * The `PwsRemoteStore` stand-in shared by the shared-collection and
  * standing-credential suites: scripted encryption descriptors plus an
- * in-memory resource map, served through the same `was.space().collection()`
+ * in-memory resource map, served through the same `pws.space().collection()`
  * handle chain `SharedCollectionReader` walks. One copy, so a change to the
  * changes-feed shape lands in both suites at once.
  */
-import { Collection, NotImplementedError } from '@interop/was-client'
-import type { CollectionEncryption } from '@interop/was-client'
-import type { WasRemoteStore } from '../../src/storage/wasRemoteStore.js'
+import { Collection, NotImplementedError } from '@interop/pws-client'
+import type { CollectionEncryption } from '@interop/pws-client'
+import type { PwsRemoteStore } from '../../src/storage/pwsRemoteStore.js'
 import { fakeDescriptorSource } from './descriptorSource.js'
 
 /**
@@ -64,7 +64,7 @@ export interface FakeRemoteStoreProbes {
  * @param [options.changesNotImplemented] {boolean}
  * @param [options.plainSource] {boolean}
  * @param [options.descriptorReadError] {Error}
- * @returns {WasRemoteStore & FakeRemoteStoreProbes}
+ * @returns {PwsRemoteStore & FakeRemoteStoreProbes}
  */
 export function fakeRemoteStore({
   collectionId,
@@ -86,7 +86,7 @@ export function fakeRemoteStore({
   changesNotImplemented?: boolean
   plainSource?: boolean
   descriptorReadError?: Error
-}): WasRemoteStore & FakeRemoteStoreProbes {
+}): PwsRemoteStore & FakeRemoteStoreProbes {
   const feed: FakeChange[] =
     changes ?? Object.entries(resources).map(([id, data]) => ({ id, data }))
   const scripted = descriptors ?? [encryption]
@@ -152,7 +152,7 @@ export function fakeRemoteStore({
 
   return {
     spaceUrl,
-    was: {
+    pws: {
       spaceAt() {
         return {
           collection() {
@@ -177,5 +177,5 @@ export function fakeRemoteStore({
     encryptionReads: () => encryptionReads,
     resourceGets: () => resourceGets,
     checkpointsRequested: () => checkpointsRequested
-  } as unknown as WasRemoteStore & FakeRemoteStoreProbes
+  } as unknown as PwsRemoteStore & FakeRemoteStoreProbes
 }

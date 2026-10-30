@@ -3,9 +3,9 @@
  */
 /**
  * Component tests (jsdom) for the `ProtectedRoute` onboarding switch. The store
- * is created directly and provided through `WasSessionContext` (bypassing
- * `WasSessionProvider`, so no `boot()` runs), and its status is driven with
- * `setState`; no IndexedDB / WAS server is touched. Covers:
+ * is created directly and provided through `PwsSessionContext` (bypassing
+ * `PwsSessionProvider`, so no `boot()` runs), and its status is driven with
+ * `setState`; no IndexedDB / PWS server is touched. Covers:
  *
  * - `local-first` renders the routed outlet while `local`;
  * - `login-gated` redirects `local` to the login path;
@@ -26,18 +26,18 @@ import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { WasSessionContext } from '../../src/react/WasSessionProvider.js'
+import { PwsSessionContext } from '../../src/react/PwsSessionProvider.js'
 import {
   createAuthStore,
   type SessionStatus,
-  type WasAuthStore
+  type PwsAuthStore
 } from '../../src/session/authStore.js'
 import { ProtectedRoute } from '../../src/mui/ProtectedRoute.js'
-import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
+import type { StoreRegistry, PwsAppConfig } from '../../src/config.js'
 
 const registry: StoreRegistry = {}
 
-function baseConfig(onboarding: 'local-first' | 'login-gated'): WasAppConfig {
+function baseConfig(onboarding: 'local-first' | 'login-gated'): PwsAppConfig {
   return {
     appName: 'Test App',
     appOrigin: 'http://localhost:5173',
@@ -48,7 +48,7 @@ function baseConfig(onboarding: 'local-first' | 'login-gated'): WasAppConfig {
   }
 }
 
-const liveStores: WasAuthStore[] = []
+const liveStores: PwsAuthStore[] = []
 
 function renderRoute({
   onboarding,
@@ -63,7 +63,7 @@ function renderRoute({
   liveStores.push(store)
   store.setState({ status, error })
   render(
-    <WasSessionContext.Provider value={store}>
+    <PwsSessionContext.Provider value={store}>
       <MemoryRouter initialEntries={['/']}>
         <Routes>
           <Route element={<ProtectedRoute />}>
@@ -75,7 +75,7 @@ function renderRoute({
           />
         </Routes>
       </MemoryRouter>
-    </WasSessionContext.Provider>
+    </PwsSessionContext.Provider>
   )
 }
 

@@ -41,7 +41,7 @@ import { CapabilityAgent } from '@interop/capability-agent'
 import {
   ownerRecipient,
   x25519RecipientFromDidKey
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import type {
   IVerifiableCredential,
   IVerifiablePresentation,
@@ -68,20 +68,20 @@ import {
 } from '../../src/identity/seedStore.js'
 import {
   createAuthStore,
-  type WasAuthStore
+  type PwsAuthStore
 } from '../../src/session/authStore.js'
-import { startWasSync } from '../../src/storage/wasSync.js'
-import { isAuthError } from '@interop/was-sync/rxdb'
+import { startPwsSync } from '../../src/storage/pwsSync.js'
+import { isAuthError } from '@interop/pws-sync/rxdb'
 import { requireStore } from '../../src/storage/storageManager.js'
-import { isUnknownEpochError, WasSyncAuthError } from '@interop/was-client/sync'
-import { rootCapabilityId } from '@interop/was-client/paths'
+import { isUnknownEpochError, PwsSyncAuthError } from '@interop/pws-client/sync'
+import { rootCapabilityId } from '@interop/pws-client/paths'
 import {
   createDocCipher,
   createUnprovisionedDocCipher
 } from '../../src/storage/docCipher.js'
-import { createWasSyncPort } from '../../src/storage/wasSyncPort.js'
+import { createPwsSyncPort } from '../../src/storage/pwsSyncPort.js'
 import { SharedCollectionReader } from '../../src/storage/sharedCollectionReader.js'
-import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
+import type { StoreRegistry, PwsAppConfig } from '../../src/config.js'
 import { chapiGet } from '../../src/auth/chapi.js'
 import { loginWithWallet } from '../../src/auth/loginFlow.js'
 
@@ -99,8 +99,8 @@ const remoteDescriptors = vi.hoisted(() => ({
 
 // Inert replication: the session machine's activate / persist / teardown logic
 // runs without opening any network or `window`-backed replication machinery.
-vi.mock('../../src/storage/wasSync.js', () => ({
-  startWasSync: vi.fn(async () => ({})),
+vi.mock('../../src/storage/pwsSync.js', () => ({
+  startPwsSync: vi.fn(async () => ({})),
   readRemoteDescriptors: vi.fn(async () => ({
     descriptors: remoteDescriptors.value,
     failures: []
@@ -128,7 +128,7 @@ const SHARED_COLLECTION_ID = 'wallet-credentials'
 
 const documentLoader = createDocumentLoader()
 const chapiGetMock = vi.mocked(chapiGet)
-const startWasSyncMock = vi.mocked(startWasSync)
+const startPwsSyncMock = vi.mocked(startPwsSync)
 
 // The hosted App Connect context defines the response VP's `zcap` and
 // `appConnect` terms exactly as the wallet emits them.
@@ -333,7 +333,7 @@ async function appKeyCredential(
   })
 }
 
-function baseConfig(): WasAppConfig {
+function baseConfig(): PwsAppConfig {
   return {
     appName: APP_NAME,
     appOrigin: ORIGIN,
@@ -355,17 +355,17 @@ function newSeedStore(): SeedStore {
 const registry: StoreRegistry = {}
 
 // Track created stores so their expiry-watch intervals never outlive a test.
-const liveStores: WasAuthStore[] = []
+const liveStores: PwsAuthStore[] = []
 
 /**
  * Persists a session whose grants came from a standing-credential account
  * (depth 3, annex-signed, clamped expiry) and boots it to `connected`.
  *
  * @param options {object}
- * @param options.config {WasAppConfig}
+ * @param options.config {PwsAppConfig}
  * @param options.seedStore {SeedStore}
  * @param [options.expires] {string}   the CLAMPED expiry the wallet returned
- * @returns {Promise<{ store: WasAuthStore, seed: Uint8Array, grants: IZcap[],
+ * @returns {Promise<{ store: PwsAuthStore, seed: Uint8Array, grants: IZcap[],
  *   controllerDid: string }>}
  */
 async function connectedStore({
@@ -373,11 +373,11 @@ async function connectedStore({
   seedStore,
   expires = futureIso(FAR_FUTURE_MS)
 }: {
-  config: WasAppConfig
+  config: PwsAppConfig
   seedStore: SeedStore
   expires?: string
 }): Promise<{
-  store: WasAuthStore
+  store: PwsAuthStore
   seed: Uint8Array
   grants: IZcap[]
   controllerDid: string
@@ -406,7 +406,7 @@ async function connectedStore({
 beforeEach(() => {
   chapiGetMock.mockReset()
   // `.at(-1)` on this mock has to name THIS test's bring-up.
-  startWasSyncMock.mockClear()
+  startPwsSyncMock.mockClear()
   remoteDescriptors.value = {}
 })
 
@@ -672,8 +672,8 @@ describe('a mid-life authorization failure', () => {
 
     // A real 403 off the wire, through the real sync port, so the mapping this
     // depends on is exercised rather than assumed.
-    const port = createWasSyncPort({
-      was: rejectingClient(403),
+    const port = createPwsSyncPort({
+      pws: rejectingClient(403),
       spaceUrl: `${SPACE_URL}/`,
       collectionId: COLLECTION_ID
     })
@@ -681,12 +681,12 @@ describe('a mid-life authorization failure', () => {
       () => null,
       (err: unknown) => err
     )
-    expect(denial).toBeInstanceOf(WasSyncAuthError)
+    expect(denial).toBeInstanceOf(PwsSyncAuthError)
     expect(isAuthError(denial)).toBe(true)
 
     // The replication bootstrap's auth-error signal is what the session wires
     // that denial into.
-    const { onAuthError } = startWasSyncMock.mock.calls.at(-1)![0] as {
+    const { onAuthError } = startPwsSyncMock.mock.calls.at(-1)![0] as {
       onAuthError: () => void
     }
     onAuthError()

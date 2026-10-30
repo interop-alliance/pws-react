@@ -10,7 +10,7 @@
  *
  * `boot` attempts a zero-popup session restore. A restore hit opens the
  * encrypted {@link LocalStore} under the session seed, hydrates the entity
- * stores, starts WAS replication, and lands `connected`. A hit whose grants
+ * stores, starts PWS replication, and lands `connected`. A hit whose grants
  * have expired opens and hydrates the same replica but starts no replication
  * and lands `reconnect`, with the seed intact: only the grants need renewing,
  * and a user whose grants ran out overnight reloads into their own data behind
@@ -35,13 +35,13 @@
  * and replica.
  *
  * The library cannot bind a module-level store to app config, so this is a
- * FACTORY: {@link createAuthStore} captures the app's {@link WasAppConfig} and
+ * FACTORY: {@link createAuthStore} captures the app's {@link PwsAppConfig} and
  * {@link StoreRegistry} once (the React provider calls it once) and returns a
  * vanilla zustand store the hooks consume through context.
  */
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { IZcap } from '@interop/data-integrity-core'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import {
   DEFAULT_DB_NAME,
   DEFAULT_EXPIRY_WARNING_MS,
@@ -49,7 +49,7 @@ import {
   DEFAULT_ONBOARDING,
   DEFAULT_STORAGE_KEY_PREFIX,
   type StoreRegistry,
-  type WasAppConfig
+  type PwsAppConfig
 } from '../config.js'
 import type { SharedCollectionReader } from '../storage/sharedCollectionReader.js'
 import { createDocumentLoader } from '../identity/documentLoader.js'
@@ -92,9 +92,9 @@ import { activateStorageContext, hasStore } from '../storage/storageManager.js'
 import { StorageContext } from '../storage/storageContext.js'
 import { getWriterId } from '../storage/writerId.js'
 import { mergeAdopted } from '../storage/adopt.js'
-import { startWasSync } from '../storage/wasSync.js'
+import { startPwsSync } from '../storage/pwsSync.js'
 import { createSpaceTrust, type SpaceTrust } from '../storage/spaceTrust.js'
-import { errorMessage } from '@interop/was-client/sync'
+import { errorMessage } from '@interop/pws-client/sync'
 import { isRosterEntryFailure } from '../storage/governedDescriptors.js'
 import { SyncController } from '../storage/syncController.js'
 import { log } from '../log.js'
@@ -151,7 +151,7 @@ export interface AuthState {
   onboarding: 'local-first' | 'login-gated'
   /**
    * The per-install LWW attribution id, resolved once at store creation from
-   * `WasAppConfig.storageKeyPrefix` and exposed for display and debugging. The
+   * `PwsAppConfig.storageKeyPrefix` and exposed for display and debugging. The
    * entity-store write verbs and the adoption repair stamp it automatically, so
    * an app never has to: one install writes under one identity either way. It
    * is an attribution label, never an identity.
@@ -247,7 +247,7 @@ export interface AuthState {
    * connected replica's database; otherwise it is kept on this browser. The
    * anonymous replica and the writer id survive either way -- a local-first app
    * keeps working logged out, and the user is expected to log back in here. Use
-   * {@link WasAuthStore.clearLocalData} to remove everything.
+   * {@link PwsAuthStore.clearLocalData} to remove everything.
    *
    * @param [options] {object}
    * @param [options.wipe] {boolean}
@@ -290,7 +290,7 @@ export interface AuthState {
 /**
  * The vanilla zustand store returned by {@link createAuthStore}.
  */
-export type WasAuthStore = StoreApi<AuthState>
+export type PwsAuthStore = StoreApi<AuthState>
 
 /**
  * Builds the session auth store bound to an app's config and store registry.
@@ -298,14 +298,14 @@ export type WasAuthStore = StoreApi<AuthState>
  * context; the hooks read it via `useStore`.
  *
  * @param options {object}
- * @param options.config {WasAppConfig}   the app-wide configuration
+ * @param options.config {PwsAppConfig}   the app-wide configuration
  * @param options.registry {StoreRegistry}   the per-collection hydrate/patch
  *   handlers the rehydrate mechanism drives
  * @param [options.seedStore] {SeedStore}   the session IndexedDB persistence
  *   (defaults to one bound to `<dbName>-session`; inject a fake for tests)
  * @param [options.storage] {ReplicaStorage}   the storage for the local store
  *   (defaults to Dexie/IndexedDB; inject a fake for tests)
- * @returns {WasAuthStore}
+ * @returns {PwsAuthStore}
  */
 export function createAuthStore({
   config,
@@ -313,11 +313,11 @@ export function createAuthStore({
   seedStore,
   storage
 }: {
-  config: WasAppConfig
+  config: PwsAppConfig
   registry: StoreRegistry
   seedStore?: SeedStore
   storage?: ReplicaStorage
-}): WasAuthStore {
+}): PwsAuthStore {
   const dbName = config.dbName ?? DEFAULT_DB_NAME
   const onboarding = config.onboarding ?? DEFAULT_ONBOARDING
   // Resolve the per-install LWW writer id ONCE, honoring the configured
@@ -362,7 +362,7 @@ export function createAuthStore({
   })
   const documentLoader = createDocumentLoader()
 
-  // The login flow consumes only the WAS collection ids + visibility; this
+  // The login flow consumes only the PWS collection ids + visibility; this
   // config layer owns the `{ key, id }` registry.
   const loginConfig: LoginConfig = {
     appOrigin: config.appOrigin,
@@ -497,7 +497,7 @@ export function createAuthStore({
       writerId: storageContext.writerId,
       ...(config.sync && { sync: config.sync })
     })
-    const { remoteStore, sharedCollections } = await startWasSync({
+    const { remoteStore, sharedCollections } = await startPwsSync({
       parsed,
       zcapClient,
       collections: config.collections,
@@ -590,7 +590,7 @@ export function createAuthStore({
     // but the UI no longer reports "Local only" over a wallet-connected
     // session that simply failed to start replicating.
     void pendingSync.catch(err => {
-      log.warn('WAS sync failed to start', { err })
+      log.warn('PWS sync failed to start', { err })
       // Deferred a macrotask: an immediate bootstrap failure would otherwise
       // race the caller's own `set({ ..., error: null })` (which lands right
       // after `persistAndStartSync` resolves) and be wiped by it.
@@ -1239,7 +1239,7 @@ export function createAuthStore({
 
   // Declared last so `prefer-const` is satisfied; the lifecycle closures above
   // only dereference `store` at call time, by which point it is assigned.
-  const store: WasAuthStore = createStore<AuthState>()((set, get) => {
+  const store: PwsAuthStore = createStore<AuthState>()((set, get) => {
     const bootImpl = async (): Promise<void> => {
       if (get().status !== 'boot') {
         return

@@ -3,7 +3,7 @@
  */
 /**
  * The storage-access-expired banner (wallet mode). Shown when a live 401/403
- * from the WAS server surfaces on the sync error stream (the granted zcaps
+ * from the PWS server surfaces on the sync error stream (the granted zcaps
  * expired or were revoked); the action relaunches the grants flow with the
  * existing seed (one wallet popup, same identity, same data).
  */

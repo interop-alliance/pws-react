@@ -3,14 +3,14 @@
  */
 /**
  * The fake `EncryptionDescriptorSource` the suites script, shaped like the one
- * the sync bootstrap installs (`WasRemoteStore.descriptorSource`): it declares
+ * the sync bootstrap installs (`PwsRemoteStore.descriptorSource`): it declares
  * `verifiesHistory: true` as the real log-governed source does, unless `plain`
  * withholds the flag, which is what a reader under `requireGoverned` must
  * refuse. The single `collectionEncryption` read is a spy, so refreshes can
  * be counted.
  */
 import { vi } from 'vitest'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 
 /**
  * @param options {object}

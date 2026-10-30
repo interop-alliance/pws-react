@@ -3,8 +3,8 @@
  */
 /**
  * Component tests (jsdom) for `AdoptDialog`. The store is created directly and
- * provided through `WasSessionContext` (no `boot()` runs), and its `login`
- * action is replaced with a stub, so no wallet, IndexedDB, or WAS server is
+ * provided through `PwsSessionContext` (no `boot()` runs), and its `login`
+ * action is replaced with a stub, so no wallet, IndexedDB, or PWS server is
  * touched. Covers:
  *
  * - each choice closes the dialog and runs `login` with its `adopt` value;
@@ -21,16 +21,16 @@
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { WasSessionContext } from '../../src/react/WasSessionProvider.js'
+import { PwsSessionContext } from '../../src/react/PwsSessionProvider.js'
 import {
   createAuthStore,
   type AuthState,
-  type WasAuthStore
+  type PwsAuthStore
 } from '../../src/session/authStore.js'
 import { AdoptDialog } from '../../src/mui/AdoptDialog.js'
-import type { WasAppConfig } from '../../src/config.js'
+import type { PwsAppConfig } from '../../src/config.js'
 
-const config: WasAppConfig = {
+const config: PwsAppConfig = {
   appName: 'Test App',
   appOrigin: 'http://localhost:5173',
   collections: [{ key: 'notes', id: 'notes' }],
@@ -38,7 +38,7 @@ const config: WasAppConfig = {
   dbName: `was-react-${Math.random().toString(36).slice(2)}`
 }
 
-const liveStores: WasAuthStore[] = []
+const liveStores: PwsAuthStore[] = []
 
 function renderDialog(outcome: 'resolve' | 'reject'): {
   onClose: ReturnType<typeof vi.fn>
@@ -57,9 +57,9 @@ function renderDialog(outcome: 'resolve' | 'reject'): {
   store.setState({ login })
   const onClose = vi.fn()
   render(
-    <WasSessionContext.Provider value={store}>
+    <PwsSessionContext.Provider value={store}>
       <AdoptDialog open onClose={onClose} />
-    </WasSessionContext.Provider>
+    </PwsSessionContext.Provider>
   )
   return { onClose, calls }
 }

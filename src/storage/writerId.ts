@@ -4,7 +4,7 @@
 /**
  * Persistence of the per-install writer id: the last-write-wins tiebreak the
  * storage context stamps into every payload. The mint itself lives in
- * `@interop/was-sync`, which takes both the key prefix and the storage as
+ * `@interop/pws-sync`, which takes both the key prefix and the storage as
  * required inputs; this module is the browser binding that supplies
  * {@link DEFAULT_STORAGE_KEY_PREFIX} and `localStorage`, so callers here keep
  * passing an optional prefix and nothing else.
@@ -18,7 +18,7 @@ import {
   clearPersistedWriterId as clearMintedWriterId,
   getWriterId as mintWriterId,
   type WriterIdStorage
-} from '@interop/was-sync'
+} from '@interop/pws-sync'
 import { DEFAULT_STORAGE_KEY_PREFIX } from '../config.js'
 
 /**

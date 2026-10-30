@@ -3,13 +3,13 @@
  */
 /**
  * The one acquisition policy for an `edv` collection's encryption descriptor:
- * was-client's `acquireDescriptor` under `requireGoverned`, so a descriptor is
+ * pws-client's `acquireDescriptor` under `requireGoverned`, so a descriptor is
  * adopted only through a source that declares `verifiesHistory: true`
- * ({@link WasRemoteStore.descriptorSource}). A plain source is refused with
+ * ({@link PwsRemoteStore.descriptorSource}). A plain source is refused with
  * `UnverifiedDescriptorError` before any fetch, and nothing refused is cached.
  * The login-time read, the sync bootstrap's install, and the local store's
  * unknown-epoch refresh acquire through {@link acquireGovernedDescriptor}. A
- * shared collection's self-refreshing cipher acquires inside was-client's own
+ * shared collection's self-refreshing cipher acquires inside pws-client's own
  * build and cannot, so it applies the same two rules itself: `requireGoverned`,
  * and {@link fetchErrorSink} for the swallowed-fetch rethrow. Both consumers
  * classify what the acquisition refused with {@link isDescriptorRefusal}.
@@ -18,14 +18,14 @@ import {
   acquireDescriptor,
   isKeyUnwrapError,
   UnverifiedDescriptorError
-} from '@interop/was-client/edv'
-import { isIntegrityError } from '@interop/was-client/sync'
+} from '@interop/pws-client/edv'
+import { isIntegrityError } from '@interop/pws-client/sync'
 import { isResourceLogRefusal } from '@interop/vh-resource-log'
 import type {
   EncryptionDescriptorCache,
   EncryptionDescriptorSource
-} from '@interop/was-client/edv'
-import type { CollectionEncryption } from '@interop/was-client'
+} from '@interop/pws-client/edv'
+import type { CollectionEncryption } from '@interop/pws-client'
 
 /**
  * A per-call in-memory `EncryptionDescriptorCache`: the cache seam
@@ -53,7 +53,7 @@ export function memoryDescriptorCache(): EncryptionDescriptorCache {
 }
 
 /**
- * Records the fetch failure was-client's acquisition swallows (it falls back
+ * Records the fetch failure pws-client's acquisition swallows (it falls back
  * to the cache, which is empty here, so the answer would read as "no
  * descriptor") and rethrows it on demand. `onFetchError` is handed to the
  * acquiring call; `rethrow` runs after it, whether it resolved or rejected,

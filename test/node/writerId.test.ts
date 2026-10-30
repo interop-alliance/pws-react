@@ -4,7 +4,7 @@
 /**
  * Unit tests for the per-install LWW writer id wiring: `getWriterId` persists
  * under the configured `storageKeyPrefix`, and `createAuthStore` resolves the
- * id once from `WasAppConfig.storageKeyPrefix` and exposes it on the session
+ * id once from `PwsAppConfig.storageKeyPrefix` and exposes it on the session
  * state -- the migration affordance the config documents (a prior install's
  * prefixed id is preserved) -- and installs it on the session's storage
  * context, which the write verbs and the adoption repair stamp from.
@@ -17,9 +17,9 @@ import { requireWriterId } from '../../src/storage/storageManager.js'
 import { getWriterId } from '../../src/storage/writerId.js'
 import { createAuthStore } from '../../src/session/authStore.js'
 import { DEFAULT_STORAGE_KEY_PREFIX } from '../../src/config.js'
-import type { WasAppConfig } from '../../src/config.js'
+import type { PwsAppConfig } from '../../src/config.js'
 
-function baseConfig(): WasAppConfig {
+function baseConfig(): PwsAppConfig {
   return {
     appName: 'Test App',
     appOrigin: 'http://localhost:5173',

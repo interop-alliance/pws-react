@@ -25,12 +25,12 @@ import { createEntityStore } from '../../src/storage/entityStore.js'
 import { publicUrlFor } from '../../src/storage/publicUrl.js'
 import { deactivateStorageContext } from '../../src/storage/storageManager.js'
 import { StorageContext } from '../../src/storage/storageContext.js'
-import { startWasSync } from '../../src/storage/wasSync.js'
+import { startPwsSync } from '../../src/storage/pwsSync.js'
 import { SyncController } from '../../src/storage/syncController.js'
 import { createSyncStatusStore } from '../../src/storage/syncStatusStore.js'
-import type { WasRemoteStore } from '../../src/storage/wasRemoteStore.js'
+import type { PwsRemoteStore } from '../../src/storage/pwsRemoteStore.js'
 import type { ZcapClient } from '@interop/ezcap'
-import type { WasCollectionConfig } from '../../src/config.js'
+import type { PwsCollectionConfig } from '../../src/config.js'
 
 // The SyncController wires an `online` listener on `window`; Node has no
 // window, so give it an inert stand-in.
@@ -41,7 +41,7 @@ import type { WasCollectionConfig } from '../../src/config.js'
 
 const PUBLIC_ID = 'microblog-posts'
 const PRIVATE_ID = 'notes'
-const REGISTRY: WasCollectionConfig[] = [
+const REGISTRY: PwsCollectionConfig[] = [
   { key: 'posts', id: PUBLIC_ID, visibility: 'public', indexes: ['title'] },
   { key: 'notes', id: PRIVATE_ID }
 ]
@@ -97,7 +97,7 @@ let zcapClient: ZcapClient
 const controllers: SyncController[] = []
 const statusStores: ReturnType<typeof createSyncStatusStore>[] = []
 const stores: LocalStore[] = []
-let remoteStore: WasRemoteStore
+let remoteStore: PwsRemoteStore
 
 // Written by the push test, read back by the pull test.
 const post = makeDoc('A world-readable post')
@@ -155,7 +155,7 @@ async function openSyncedReplica(dbName: string): Promise<LocalStore> {
     sync: { pollMs: 500, retryMs: 500 }
   })
   controllers.push(controller)
-  ;({ remoteStore } = await startWasSync({
+  ;({ remoteStore } = await startPwsSync({
     parsed,
     zcapClient,
     collections: REGISTRY,
@@ -174,7 +174,7 @@ describe('plaintext-collection sync against web-spaces-server', () => {
 
     // The public resource lands under its own logical id, plaintext.
     const publicBody = await waitFor(async () => {
-      const response = await remoteStore.was.request({
+      const response = await remoteStore.pws.request({
         capability: remoteStore.collectionCapability(PUBLIC_ID),
         url: `${remoteStore.spaceUrl}${PUBLIC_ID}/${post.id}`,
         method: 'GET'
@@ -189,7 +189,7 @@ describe('plaintext-collection sync against web-spaces-server', () => {
     const envelopeId = rows[0]!.id
     expect(envelopeId).not.toBe(note.id)
     const privateBody = await waitFor(async () => {
-      const response = await remoteStore.was.request({
+      const response = await remoteStore.pws.request({
         capability: remoteStore.collectionCapability(PRIVATE_ID),
         url: `${remoteStore.spaceUrl}${PRIVATE_ID}/${envelopeId}`,
         method: 'GET'
@@ -279,7 +279,7 @@ describe('plaintext-collection sync against web-spaces-server', () => {
     // only members are `id` and an object `jwe`. Written straight to the
     // server, as a foreign client would, so it arrives through the pull path.
     const strayId = 'stray-envelope'
-    await remoteStore.was.request({
+    await remoteStore.pws.request({
       capability: remoteStore.collectionCapability(PUBLIC_ID),
       url: `${remoteStore.spaceUrl}${PUBLIC_ID}/${strayId}`,
       method: 'PUT',
@@ -321,7 +321,7 @@ describe('plaintext-collection sync against web-spaces-server', () => {
     // dev-grant provisioner creates plaintext collections but does not attach a
     // public-read policy). Set via the delegated collection capability, whose
     // invocationTarget is a RESTful prefix of the collection `/policy` path.
-    await remoteStore.was.request({
+    await remoteStore.pws.request({
       capability: remoteStore.collectionCapability(PUBLIC_ID),
       url: `${remoteStore.spaceUrl}${PUBLIC_ID}/policy`,
       method: 'PUT',

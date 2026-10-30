@@ -7,7 +7,7 @@
  * key-agreement key (`deriveIdentity`) as the recipient -- exactly the key the
  * wallet registers as the app's roster entry -- so the round-trip proves the
  * shared-key contract, not a synthetic key. A descriptor is minted with
- * was-client's own `initRecipients` over the shared in-memory roster fixture.
+ * pws-client's own `initRecipients` over the shared in-memory roster fixture.
  *
  * @vitest-environment node
  */
@@ -17,16 +17,16 @@ import {
   ownerRecipient,
   epochKeyIdFor,
   wrapEpochSecret
-} from '@interop/was-client/edv'
-import type { CollectionEncryption } from '@interop/was-client'
+} from '@interop/pws-client/edv'
+import type { CollectionEncryption } from '@interop/pws-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import {
   isEncryptedEnvelope,
   isUnknownEpochError
-} from '@interop/was-client/sync'
+} from '@interop/pws-client/sync'
 import { deriveIdentity } from '../identity/agents.js'
 import { createDocCipher, createUnprovisionedDocCipher } from './docCipher.js'
-import type { Json } from '@interop/was-sync'
+import type { Json } from '@interop/pws-sync'
 import { encodeIndexSchemaMeta } from '../../test/fixtures/indexSchemaMeta.js'
 import { mintRoster } from '../../test/fixtures/roster.js'
 

@@ -31,7 +31,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import type { IZcap } from '@interop/data-integrity-core'
 import {
   createAuthStore,
-  type WasAuthStore
+  type PwsAuthStore
 } from '../../src/session/authStore.js'
 import {
   executeLocalWipe,
@@ -44,21 +44,21 @@ import {
   requireWriterId
 } from '../../src/storage/storageManager.js'
 import { DEFAULT_STORAGE_KEY_PREFIX } from '../../src/config.js'
-import { rootCapabilityId } from '@interop/was-client/paths'
-import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
+import { rootCapabilityId } from '@interop/pws-client/paths'
+import type { StoreRegistry, PwsAppConfig } from '../../src/config.js'
 
 const SPACE_URL = 'http://localhost:3999/space/space-1/'
 
 // Inert replication: the wipe logic runs without any network machinery, and a
 // public collection needs no descriptor read.
-vi.mock('../../src/storage/wasSync.js', () => ({
-  startWasSync: vi.fn(async () => ({})),
+vi.mock('../../src/storage/pwsSync.js', () => ({
+  startPwsSync: vi.fn(async () => ({})),
   readRemoteDescriptors: vi.fn(async () => ({ descriptors: {}, failures: [] }))
 }))
 
 const registry: StoreRegistry = {}
 
-const liveStores: WasAuthStore[] = []
+const liveStores: PwsAuthStore[] = []
 
 // A minimal `localStorage` (node has none): the writer id is the one piece of
 // wipe state that does not live in IndexedDB.
@@ -82,7 +82,7 @@ function storedKeys(prefix: string): string[] {
   return [...stored.keys()].filter(key => key.startsWith(prefix))
 }
 
-function baseConfig(): WasAppConfig {
+function baseConfig(): PwsAppConfig {
   return {
     appName: 'Test App',
     appOrigin: 'http://localhost:5173',
@@ -99,7 +99,7 @@ function baseConfig(): WasAppConfig {
  * `<dbName>-anon` on the shared fake IndexedDB), rather than an injected
  * store: their databases are part of what the wipe has to reach.
  */
-function makeStore(config: WasAppConfig): WasAuthStore {
+function makeStore(config: PwsAppConfig): PwsAuthStore {
   const store = createAuthStore({ config, registry })
   liveStores.push(store)
   return store
@@ -125,7 +125,7 @@ async function databaseNames(): Promise<string[]> {
  * `<dbName>-...` directly, and each replica collection is its own Dexie
  * database named `rxdb-dexie-<dbName>-<hash>--<version>--<collection>`.
  */
-async function appDatabaseNames(config: WasAppConfig): Promise<string[]> {
+async function appDatabaseNames(config: PwsAppConfig): Promise<string[]> {
   const names = await databaseNames()
   return names.filter(
     name =>

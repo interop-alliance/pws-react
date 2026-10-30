@@ -15,7 +15,7 @@ import {
   startTestServer
 } from '@interop/web-spaces-server/testing'
 import { CapabilityAgent } from '@interop/capability-agent'
-import { WasClient } from '@interop/was-client'
+import { PwsClient } from '@interop/pws-client'
 import { webvhZcapClient } from '@interop/wallet-core/webvh'
 import {
   DEFAULT_PROVISIONER_SEED,
@@ -56,7 +56,7 @@ async function describeAsOwner({
     handle: 'dev-provisioner',
     keyName: 'provisioner-key'
   })
-  const owner = new WasClient({
+  const owner = new PwsClient({
     baseServerUrl: server!.baseServerUrl,
     zcapClient: webvhZcapClient({ keyAgent, did })
   })

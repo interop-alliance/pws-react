@@ -3,7 +3,7 @@
  */
 /**
  * The per-collection EDV document cipher: the local encrypt/decrypt seam. It
- * wraps the same `@interop/was-client` EDV codec the remote WAS handles use,
+ * wraps the same `@interop/pws-client` EDV codec the remote PWS handles use,
  * pointed at the local replica: `encrypt` turns a JSON document into its stored
  * EDV envelope (`{ id, sequence, jwe }`) minting a stable random resource id
  * (`idDerivation: 'random'`), and `encryptUpdate` re-encrypts a mutable head
@@ -26,15 +26,15 @@ import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
-import type { CollectionEncryption } from '@interop/was-client'
-import { createEdvDocCipher, UnknownEpochError } from '@interop/was-client/edv'
+import type { CollectionEncryption } from '@interop/pws-client'
+import { createEdvDocCipher, UnknownEpochError } from '@interop/pws-client/edv'
 import {
   IntegrityError,
   isEncryptedEnvelope,
   requireResourceId,
   type DocCipher as ClientDocCipher
-} from '@interop/was-client/sync'
-import type { Json } from '@interop/was-sync'
+} from '@interop/pws-client/sync'
+import type { Json } from '@interop/pws-sync'
 
 /**
  * A per-collection document cipher. `encrypt` is the create path (mints a random
@@ -57,7 +57,7 @@ import type { Json } from '@interop/was-sync'
  * the pass-through plaintext codec and on the fail-closed placeholder, neither
  * of which has a schema to install -- hence optional here.
  *
- * `decrypt`'s return type is narrower than `@interop/was-client/sync`'s
+ * `decrypt`'s return type is narrower than `@interop/pws-client/sync`'s
  * `DocCipher['decrypt']` (`Json` rather than `Json | Blob`): no collection in
  * this repo writes a chunked (binary) document, so a `Blob` result never
  * occurs here. For the same reason the chunked-blob `context` / `spaceId`
@@ -90,7 +90,7 @@ export interface DocCipher extends ClientDocCipher {
  * id, raised as one error so the storage layer above applies one rule to them
  * (a public collection takes writes from any grant holder, and such a row is
  * malformed data, not a broken seal). A caller that passes no resource id to
- * check against is refused outright by was-client's own `requireResourceId`,
+ * check against is refused outright by pws-client's own `requireResourceId`,
  * the guard both of its built-in ciphers run first.
  *
  * @param options {object}
@@ -131,7 +131,7 @@ export function createPlaintextDocCodec({
     },
 
     async decrypt({ id, envelope }: { id: string; envelope: Json }) {
-      // The same guard both of was-client's own ciphers run first: a decrypt
+      // The same guard both of pws-client's own ciphers run first: a decrypt
       // carrying no resource id would silently skip the binding check below.
       requireResourceId({ id, collectionId })
       const body = assertPlaintext(envelope)
@@ -157,7 +157,7 @@ export function createPlaintextDocCodec({
  * place via `sequence` -- the mutable head-document model every entity here uses
  * (constant bump / toggle / re-categorize edits).
  *
- * Delegates to `@interop/was-client`'s `createEdvDocCipher`, which requires an
+ * Delegates to `@interop/pws-client`'s `createEdvDocCipher`, which requires an
  * epoch-bearing `encryption` descriptor (epoch-from-birth: every encrypted
  * collection carries a key-epoch roster from creation, and a rosterless
  * descriptor is refused fail-closed upstream). Writes stamp the descriptor's

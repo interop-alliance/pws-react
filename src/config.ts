@@ -2,14 +2,14 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The central configuration contract for a WAS-backed local-first app: the app
+ * The central configuration contract for a PWS-backed local-first app: the app
  * identity/origin/URL, the registry of storage collections, and the
  * (all-optional) sync/expiry tuning. An app builds one
- * {@link WasAppConfig} and threads it through the auth, storage, and sync
+ * {@link PwsAppConfig} and threads it through the auth, storage, and sync
  * layers.
  *
  * A collection is a logical `key` (the app-side / RxDB collection handle) mapped
- * to its WAS collection `id` (the deliberately unprefixed, generic name shared
+ * to its PWS collection `id` (the deliberately unprefixed, generic name shared
  * across interoperable apps). The auth layer consumes only the `id`s; this
  * config layer owns the `{ key, id }` registry the storage layer routes on.
  *
@@ -28,15 +28,15 @@
  */
 /**
  * One storage collection: the logical `key` (app-side / RxDB collection handle)
- * mapped to its WAS collection `id` (the generic, interoperable name).
+ * mapped to its PWS collection `id` (the generic, interoperable name).
  */
-export interface WasCollectionConfig {
+export interface PwsCollectionConfig {
   /**
    * App-side name; the localStore / RxDB collection handle.
    */
   key: string
   /**
-   * WAS collection id (the unprefixed, cross-app generic name).
+   * PWS collection id (the unprefixed, cross-app generic name).
    */
   id: string
   /**
@@ -76,7 +76,7 @@ export interface WasCollectionConfig {
  * One SHARED collection: a wallet-owned, already-encrypted collection the app
  * asks the wallet for read-and-decrypt access to (the
  * `https://w3id.org/byoe#shared-wallet-collection` grant). It is the mirror image of
- * {@link WasCollectionConfig}: read-only, NOT replicated into RxDB, NOT written
+ * {@link PwsCollectionConfig}: read-only, NOT replicated into RxDB, NOT written
  * to, and with no local replica. Reads go straight to the server through a
  * `SharedCollectionReader`.
  */
@@ -86,7 +86,7 @@ export interface SharedCollectionConfig {
    */
   key: string
   /**
-   * WAS collection id in the wallet's Space (e.g. `private-credentials`).
+   * PWS collection id in the wallet's Space (e.g. `private-credentials`).
    */
   id: string
 }
@@ -94,7 +94,7 @@ export interface SharedCollectionConfig {
 /**
  * Optional replication tuning; each field falls back to a documented default.
  */
-export interface WasSyncConfig {
+export interface PwsSyncConfig {
   /**
    * Replication batch size; `undefined` leaves the adapter default.
    */
@@ -122,7 +122,7 @@ export interface WasSyncConfig {
 /**
  * Optional near-expiry warning tuning; each field has the same default.
  */
-export interface WasExpiryConfig {
+export interface PwsExpiryConfig {
   /**
    * How close to grant expiry (ms) the reconnect warning is raised proactively.
    * Defaults to {@link DEFAULT_EXPIRY_WARNING_MS} (1h).
@@ -139,7 +139,7 @@ export interface WasExpiryConfig {
  * The cohesive, app-wide configuration. Built once by the app and threaded
  * through the auth, storage, and sync layers.
  */
-export interface WasAppConfig {
+export interface PwsAppConfig {
   /**
    * Human-readable app name, used in the wallet consent reason lines.
    */
@@ -164,9 +164,9 @@ export interface WasAppConfig {
    */
   mediatorBase?: string
   /**
-   * The storage collections (logical key to WAS collection id).
+   * The storage collections (logical key to PWS collection id).
    */
-  collections: WasCollectionConfig[]
+  collections: PwsCollectionConfig[]
   /**
    * Wallet-owned collections this app asks to be given READ-AND-DECRYPT access
    * to (the `https://w3id.org/byoe#shared-wallet-collection` grant). Read-only by construction: they
@@ -207,11 +207,11 @@ export interface WasAppConfig {
   /**
    * Replication tuning; all fields optional with documented defaults.
    */
-  sync?: WasSyncConfig
+  sync?: PwsSyncConfig
   /**
    * Near-expiry warning tuning; all fields optional with the same default.
    */
-  expiry?: WasExpiryConfig
+  expiry?: PwsExpiryConfig
 }
 
 /**
@@ -284,19 +284,19 @@ export const DEFAULT_EXPIRY_WATCH_MS = 60 * 1000
  * Validates a collection registry, fail-closed. Rejects an unknown `visibility`
  * value (a config written against a future library version must not silently
  * fall back to either mode), the encrypted-but-public combination: the same
- * WAS collection id registered under conflicting visibilities, which would
+ * PWS collection id registered under conflicting visibilities, which would
  * treat one server-side collection as both encrypted (private) and plaintext
  * (public), and malformed `indexes` declarations (empty or duplicate attribute
- * names, and the same WAS collection id declared with diverging index sets).
+ * names, and the same PWS collection id declared with diverging index sets).
  * Indexes are valid on either visibility -- a public collection serves them
  * over the plaintext filter GET, a private one over the blinded-index query
  * profile -- so only their shape is checked here. Called by the storage layer
  * before any replica is opened.
  *
- * @param collections {WasCollectionConfig[]}   the collection registry
+ * @param collections {PwsCollectionConfig[]}   the collection registry
  * @returns {void}
  */
-export function validateCollections(collections: WasCollectionConfig[]): void {
+export function validateCollections(collections: PwsCollectionConfig[]): void {
   const visibilityById = new Map<string, 'private' | 'public'>()
   const indexesById = new Map<string, string>()
   for (const { key, id, visibility, indexes } of collections) {
@@ -332,7 +332,7 @@ export function validateCollections(collections: WasCollectionConfig[]): void {
         seen.add(name)
       }
     }
-    // The same WAS id registered under two keys must declare identical indexes
+    // The same PWS id registered under two keys must declare identical indexes
     // (order-insensitive): the sync bootstrap announces ONE declaration per
     // server-side collection.
     const canonical = [...(indexes ?? [])].sort().join(' ')
@@ -340,7 +340,7 @@ export function validateCollections(collections: WasCollectionConfig[]): void {
     if (priorIndexes !== undefined && priorIndexes !== canonical) {
       throw new Error(
         `Collection id "${id}" is registered with diverging index ` +
-          `declarations; every entry for one WAS collection must declare the ` +
+          `declarations; every entry for one PWS collection must declare the ` +
           `same indexes.`
       )
     }
@@ -358,7 +358,7 @@ export function validateCollections(collections: WasCollectionConfig[]): void {
  * opened.
  *
  * @param options {object}
- * @param options.collections {WasCollectionConfig[]}   the app-owned registry
+ * @param options.collections {PwsCollectionConfig[]}   the app-owned registry
  * @param [options.sharedCollections] {SharedCollectionConfig[]}   the shared
  *   (read-only) registry
  * @returns {void}
@@ -367,7 +367,7 @@ export function validateSharedCollections({
   collections,
   sharedCollections = []
 }: {
-  collections: WasCollectionConfig[]
+  collections: PwsCollectionConfig[]
   sharedCollections?: SharedCollectionConfig[]
 }): void {
   const ownedKeys = new Set(collections.map(entry => entry.key))
@@ -417,6 +417,6 @@ export function validateSharedCollections({
  */
 export function isPublicCollection({
   visibility
-}: Pick<WasCollectionConfig, 'visibility'>): boolean {
+}: Pick<PwsCollectionConfig, 'visibility'>): boolean {
   return (visibility ?? 'private') === 'public'
 }

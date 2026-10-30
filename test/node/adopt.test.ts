@@ -16,9 +16,9 @@ import { mintRecordEncryption } from '../../src/index.js'
 import { LocalStore } from '../../src/storage/localStore.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import { mergeAdopted } from '../../src/storage/adopt.js'
-import type { WasCollectionConfig } from '../../src/config.js'
+import type { PwsCollectionConfig } from '../../src/config.js'
 
-const COLLECTIONS: WasCollectionConfig[] = [{ key: 'notes', id: 'notes' }]
+const COLLECTIONS: PwsCollectionConfig[] = [{ key: 'notes', id: 'notes' }]
 const COLLECTION = 'notes'
 const MERGE_CLIENT_ID = 'merge-client'
 

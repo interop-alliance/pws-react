@@ -9,11 +9,11 @@
  * writes it with). One copy, so a change to the codec's `encodeMeta` contract
  * lands in both suites at once.
  */
-import { createEdvEncryption } from '@interop/was-client/edv'
+import { createEdvEncryption } from '@interop/pws-client/edv'
 import type {
   CollectionEncryption,
   ResourceMetadataCustom
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import type {
   IKeyAgreementKey,
   IKeyResolver

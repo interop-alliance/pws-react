@@ -25,7 +25,7 @@
  * new one.
  */
 import { remotePayloadWins } from '@interop/social-core'
-import { lwwFields } from '@interop/was-sync'
+import { lwwFields } from '@interop/pws-sync'
 import type { LocalStore } from './localStore.js'
 
 /**

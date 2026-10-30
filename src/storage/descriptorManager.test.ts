@@ -11,17 +11,17 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IZcap } from '@interop/data-integrity-core'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import { deriveIdentity, type IdentityAgents } from '../identity/agents.js'
 import { createDescriptorCache, type SeedStore } from '../identity/seedStore.js'
 import type { ParsedGrants } from '../grants.js'
-import type { WasCollectionConfig } from '../config.js'
+import type { PwsCollectionConfig } from '../config.js'
 import { createDescriptorManager } from './descriptorManager.js'
-import { readRemoteDescriptors, type DescriptorReadOutcome } from './wasSync.js'
+import { readRemoteDescriptors, type DescriptorReadOutcome } from './pwsSync.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../log.js'
 
-vi.mock('./wasSync.js', () => ({
+vi.mock('./pwsSync.js', () => ({
   readRemoteDescriptors: vi.fn(async (): Promise<DescriptorReadOutcome> => ({
     descriptors: {},
     failures: []
@@ -30,7 +30,7 @@ vi.mock('./wasSync.js', () => ({
 
 const readRemoteDescriptorsMock = vi.mocked(readRemoteDescriptors)
 
-const collections: WasCollectionConfig[] = [
+const collections: PwsCollectionConfig[] = [
   { key: 'notes', id: 'notes' },
   { key: 'posts', id: 'posts', visibility: 'public' }
 ]

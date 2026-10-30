@@ -3,7 +3,7 @@
  */
 /**
  * Round-trip tests for the local encrypted store: the app's real identity
- * X25519 key drives the was-client EDV codec end to end through RxDB (Dexie
+ * X25519 key drives the pws-client EDV codec end to end through RxDB (Dexie
  * storage on fake-indexeddb). Asserts create / list / in-place update (envelope id stable,
  * sequence advances) / delete, and that the at-rest row is ciphertext only. A
  * second block covers PUBLIC (plaintext) collections: payloads stored as-is
@@ -22,23 +22,23 @@ import {
   mintHmacKey,
   ownerRecipient,
   wrapEpochSecret
-} from '@interop/was-client/edv'
-import type { CollectionEncryption } from '@interop/was-client'
-import { isIntegrityError } from '@interop/was-client/sync'
-import type { Json } from '@interop/was-sync'
+} from '@interop/pws-client/edv'
+import type { CollectionEncryption } from '@interop/pws-client'
+import { isIntegrityError } from '@interop/pws-client/sync'
+import type { Json } from '@interop/pws-sync'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import { LocalStore } from '../../src/storage/localStore.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
-import type { WasCollectionConfig } from '../../src/config.js'
+import type { PwsCollectionConfig } from '../../src/config.js'
 import { encodeIndexSchemaMeta } from '../fixtures/indexSchemaMeta.js'
 import { FOREIGN_SEED, mintRoster, rotateRoster } from '../fixtures/roster.js'
 
 // A neutral test collection registry (not any app's real collections).
-const COLLECTIONS: WasCollectionConfig[] = [{ key: 'notes', id: 'notes' }]
+const COLLECTIONS: PwsCollectionConfig[] = [{ key: 'notes', id: 'notes' }]
 const COLLECTION = 'notes'
 
 // A mixed registry: the private collection above plus a public (plaintext) one.
-const MIXED: WasCollectionConfig[] = [
+const MIXED: PwsCollectionConfig[] = [
   { key: 'notes', id: 'notes' },
   { key: 'posts', id: 'microblog-posts', visibility: 'public' }
 ]
@@ -71,7 +71,7 @@ async function identityKeys() {
 
 async function openStore(
   dbName: string,
-  collections: WasCollectionConfig[] = COLLECTIONS,
+  collections: PwsCollectionConfig[] = COLLECTIONS,
   descriptors?: Record<string, CollectionEncryption>
 ): Promise<LocalStore> {
   // Epoch-from-birth: a private collection only gets a real cipher from an
@@ -996,7 +996,7 @@ describe('LocalStore public (plaintext) collections', () => {
     const rows = await store.rxCollection(PUBLIC_COLLECTION).find().exec()
     expect(rows).toHaveLength(1)
     const row = rows[0]!.toMutableJSON()
-    // One id plane: the row (WAS resource) id IS the payload uuid.
+    // One id plane: the row (PWS resource) id IS the payload uuid.
     expect(row.id).toBe(post.id)
     // The stored body is the payload verbatim -- no envelope, no ciphertext.
     expect(row.data).toEqual(post)
@@ -1115,7 +1115,7 @@ describe('LocalStore public (plaintext) collections', () => {
     ).rejects.toSatisfy(isIntegrityError)
   })
 
-  it('rejects a registry mapping one WAS id to both visibilities', async () => {
+  it('rejects a registry mapping one PWS id to both visibilities', async () => {
     await expect(
       LocalStore.init({
         ...(await identityKeys()),

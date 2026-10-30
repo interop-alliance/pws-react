@@ -60,7 +60,7 @@ import type {
 } from './walletRequestTypes.js'
 
 /**
- * The full WAS action vocabulary, in the order of the App Connect spec's
+ * The full PWS action vocabulary, in the order of the App Connect spec's
  * "Allowed actions" table -- also the allowed-action set of BOTH collection
  * classes, `https://w3id.org/byoe#private-collection` and
  * `https://w3id.org/byoe#public-collection`.
@@ -93,12 +93,12 @@ export function actionCeiling(_visibility?: 'private' | 'public'): string[] {
 }
 
 /**
- * One collection to request a grant for: the WAS collection id plus its
+ * One collection to request a grant for: the PWS collection id plus its
  * declared visibility (`'private'`, the default, or `'public'`).
  */
 export interface GrantRequestCollection {
   /**
-   * WAS collection id (the unprefixed, cross-app generic name).
+   * PWS collection id (the unprefixed, cross-app generic name).
    */
   id: string
   /**
@@ -128,7 +128,7 @@ export function newChallenge(): string {
  * as the config bug it is.
  *
  * @param options {object}
- * @param options.id {string}   the WAS collection id (for error messages)
+ * @param options.id {string}   the PWS collection id (for error messages)
  * @param [options.visibility] {'private' | 'public'}
  * @param [options.actions] {string[]}   the configured action set
  * @returns {string[]}
@@ -187,8 +187,8 @@ function requestedActions({
  * @param options.appUrl {string}   the application's canonical URL, same-origin
  *   with `domain`, query- and fragment-less; emitted in its serialized form
  * @param options.collections {GrantRequestCollection[]}   the collections to
- *   request (WAS collection id + visibility)
- * @param [options.sharedCollections] {string[]}   WAS collection ids of
+ *   request (PWS collection id + visibility)
+ * @param [options.sharedCollections] {string[]}   PWS collection ids of
  *   wallet-owned collections to request read-and-decrypt access to; each gets
  *   a `https://w3id.org/byoe#shared-wallet-collection` descriptor with
  *   {@link SHARED_ACTIONS}

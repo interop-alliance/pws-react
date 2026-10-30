@@ -9,7 +9,7 @@ export {
   createAuthStore,
   type SessionStatus,
   type AuthState,
-  type WasAuthStore
+  type PwsAuthStore
 } from './authStore.js'
 export {
   executeLocalWipe,

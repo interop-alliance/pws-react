@@ -1,31 +1,31 @@
 /**
  * Unit tests for the metadata read pass shared by the login-time
- * `readRemoteDescriptors` and the sync bootstrap `startWasSync`: a read that
+ * `readRemoteDescriptors` and the sync bootstrap `startPwsSync`: a read that
  * FAILS is never taken for "no descriptor", each granted collection's object
  * is read once, and the blinded-index install re-reads it only when the
  * declaration replaced its `custom`. The remote store is replaced with a stub
- * (`WasRemoteStore.fromGrants` is spied), and the local store and sync
+ * (`PwsRemoteStore.fromGrants` is spied), and the local store and sync
  * controller are inert fakes.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import {
   KeyUnwrapError,
   UnverifiedDescriptorError
-} from '@interop/was-client/edv'
-import type { WasCollectionConfig } from '../config.js'
+} from '@interop/pws-client/edv'
+import type { PwsCollectionConfig } from '../config.js'
 import type { ParsedGrants } from '../grants.js'
 import type { LocalStore } from './localStore.js'
 import type { SyncController } from './syncController.js'
-import { WasRemoteStore, type CollectionMetaRead } from './wasRemoteStore.js'
+import { PwsRemoteStore, type CollectionMetaRead } from './pwsRemoteStore.js'
 import { fakeDescriptorSource } from '../../test/fixtures/descriptorSource.js'
-import { readRemoteDescriptors, startWasSync } from './wasSync.js'
+import { readRemoteDescriptors, startPwsSync } from './pwsSync.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../log.js'
 
-const collections: WasCollectionConfig[] = [
+const collections: PwsCollectionConfig[] = [
   { key: 'notes', id: 'notes' },
   { key: 'tasks', id: 'tasks' }
 ]
@@ -105,8 +105,8 @@ function stubRemoteStore(
       skipped: true
     }))
   }
-  vi.spyOn(WasRemoteStore, 'fromGrants').mockReturnValue(
-    stub as unknown as WasRemoteStore
+  vi.spyOn(PwsRemoteStore, 'fromGrants').mockReturnValue(
+    stub as unknown as PwsRemoteStore
   )
   return stub
 }
@@ -169,7 +169,7 @@ describe('readRemoteDescriptors', () => {
   })
 })
 
-describe('startWasSync under a refused source', () => {
+describe('startPwsSync under a refused source', () => {
   it('installs nothing and caches nothing', async () => {
     const capture = captureLogger('wr')
     const previous = setLogger(capture.logger)
@@ -185,7 +185,7 @@ describe('startWasSync under a refused source', () => {
     const syncController = { start: vi.fn(async () => {}) }
     const fetched = vi.fn()
     try {
-      await startWasSync({
+      await startPwsSync({
         parsed,
         zcapClient,
         collections,
@@ -215,7 +215,7 @@ describe('startWasSync under a refused source', () => {
   })
 })
 
-describe('startWasSync descriptor read failure', () => {
+describe('startPwsSync descriptor read failure', () => {
   it('skips the failed collection entirely and bootstraps the rest', async () => {
     const capture = captureLogger('wr')
     const previous = setLogger(capture.logger)
@@ -231,7 +231,7 @@ describe('startWasSync descriptor read failure', () => {
     const syncController = { start: vi.fn(async () => {}) }
     const fetched = vi.fn()
 
-    await startWasSync({
+    await startPwsSync({
       parsed,
       zcapClient,
       collections,
@@ -266,7 +266,7 @@ describe('startWasSync descriptor read failure', () => {
   })
 })
 
-describe('startWasSync hook failure', () => {
+describe('startPwsSync hook failure', () => {
   it('costs the collection whose cipher rebuild throws, and replicates the rest', async () => {
     const capture = captureLogger('wr')
     const previous = setLogger(capture.logger)
@@ -288,7 +288,7 @@ describe('startWasSync hook failure', () => {
     const syncController = { start: vi.fn(async () => {}) }
     const fetched = vi.fn()
 
-    await startWasSync({
+    await startPwsSync({
       parsed,
       zcapClient,
       collections,
@@ -320,7 +320,7 @@ describe('startWasSync hook failure', () => {
   })
 })
 
-describe('startWasSync blinded-index schema install', () => {
+describe('startPwsSync blinded-index schema install', () => {
   const blinded = {
     ...descriptor,
     hmac: { id: 'urn:hmac', type: 'Sha256HmacKey2019' }
@@ -338,7 +338,7 @@ describe('startWasSync blinded-index schema install', () => {
       setDescriptorSource: vi.fn()
     }
     const syncController = { start: vi.fn(async () => {}) }
-    await startWasSync({
+    await startPwsSync({
       parsed,
       zcapClient,
       collections,

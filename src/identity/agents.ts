@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * WAS master-identity derivation from a 32-byte master seed.
+ * PWS master-identity derivation from a 32-byte master seed.
  *
  * SEED-DERIVATION CONVENTION (pinned, part of the shared-key contract): the
  * pinned `@interop/capability-agent` exposes `CapabilityAgent.fromSeed({ seed })`,
@@ -46,7 +46,7 @@
  */
 import { CapabilityAgent } from '@interop/capability-agent'
 import type { ZcapClient } from '@interop/ezcap'
-import { agentsFromKeyAgent } from '@interop/was-client/identity'
+import { agentsFromKeyAgent } from '@interop/pws-client/identity'
 import type {
   IKeyAgreementKey,
   IKeyResolver

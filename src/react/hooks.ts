@@ -9,8 +9,8 @@
 import { useContext } from 'react'
 import { useStore } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { WasSessionContext } from './WasSessionProvider.js'
-import type { WasAuthStore } from '../session/authStore.js'
+import { PwsSessionContext } from './PwsSessionProvider.js'
+import type { PwsAuthStore } from '../session/authStore.js'
 import type { LocalWipeReport } from '../session/localWipe.js'
 import type { SharedCollectionReader } from '../storage/sharedCollectionReader.js'
 import {
@@ -19,17 +19,17 @@ import {
 } from '../storage/syncStatusStore.js'
 
 /**
- * The bound auth store from the nearest {@link WasSessionProvider}. Throws a
+ * The bound auth store from the nearest {@link PwsSessionProvider}. Throws a
  * helpful error when used outside a provider.
  *
- * @returns {WasAuthStore}
+ * @returns {PwsAuthStore}
  */
-export function useAuthStore(): WasAuthStore {
-  const store = useContext(WasSessionContext)
+export function useAuthStore(): PwsAuthStore {
+  const store = useContext(PwsSessionContext)
   if (!store) {
     throw new Error(
-      'useAuthStore must be used within a <WasSessionProvider>. Wrap your app ' +
-        'in <WasSessionProvider config={...} registry={...}>.'
+      'useAuthStore must be used within a <PwsSessionProvider>. Wrap your app ' +
+        'in <PwsSessionProvider config={...} registry={...}>.'
     )
   }
   return store
@@ -44,11 +44,11 @@ export function useAuthStore(): WasAuthStore {
  * @returns {object}
  */
 export function useSession(): {
-  status: ReturnType<WasAuthStore['getState']>['status']
-  onboarding: ReturnType<WasAuthStore['getState']>['onboarding']
+  status: ReturnType<PwsAuthStore['getState']>['status']
+  onboarding: ReturnType<PwsAuthStore['getState']>['onboarding']
   writerId: string
   authenticating: boolean
-  phase: ReturnType<WasAuthStore['getState']>['phase']
+  phase: ReturnType<PwsAuthStore['getState']>['phase']
   error: string | null
   controllerDid: string | null
   expires: string | null
@@ -88,8 +88,8 @@ export function useLogin(): {
     adopt?: 'merge' | 'leave'
   }) => Promise<{ firstRun: boolean } | null>
   authenticating: boolean
-  status: ReturnType<WasAuthStore['getState']>['status']
-  phase: ReturnType<WasAuthStore['getState']>['phase']
+  status: ReturnType<PwsAuthStore['getState']>['status']
+  phase: ReturnType<PwsAuthStore['getState']>['phase']
   error: string | null
 } {
   const store = useAuthStore()

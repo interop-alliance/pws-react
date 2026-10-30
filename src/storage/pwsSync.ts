@@ -2,8 +2,8 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * Shared WAS replication bootstrap: given a parsed grant set and the invoking
- * ZcapClient, builds the delegated {@link WasRemoteStore}, acquires each
+ * Shared PWS replication bootstrap: given a parsed grant set and the invoking
+ * ZcapClient, builds the delegated {@link PwsRemoteStore}, acquires each
  * granted private collection's descriptor through the store's governed source,
  * best-effort declares each collection's equality indexes -- as the Metadata
  * object's plaintext `plaintext.indexes` member for a public one, inside its
@@ -22,19 +22,19 @@
  * a recipient of, is skipped with a warning rather than failing the session.
  */
 import type { ZcapClient } from '@interop/ezcap'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
-import { hasKeyEpochs } from '@interop/was-client/edv'
+import { hasKeyEpochs } from '@interop/pws-client/edv'
 import {
   isPublicCollection,
   type SharedCollectionConfig,
-  type WasCollectionConfig
+  type PwsCollectionConfig
 } from '../config.js'
 import type { ParsedGrants } from '../grants.js'
-import { WasRemoteStore, type CollectionMetaRead } from './wasRemoteStore.js'
+import { PwsRemoteStore, type CollectionMetaRead } from './pwsRemoteStore.js'
 import type { SpaceTrust } from './spaceTrust.js'
 import { SharedCollectionReader } from './sharedCollectionReader.js'
 import { acquireGovernedDescriptor } from './governedDescriptors.js'
@@ -47,8 +47,8 @@ import { log } from '../log.js'
  * read-only {@link SharedCollectionReader} per configured shared collection the
  * grant set covers and this app is a recipient of, keyed by the config `key`.
  */
-export interface WasSyncBootstrap {
-  remoteStore: WasRemoteStore
+export interface PwsSyncBootstrap {
+  remoteStore: PwsRemoteStore
   sharedCollections: Record<string, SharedCollectionReader>
 }
 
@@ -81,8 +81,8 @@ export interface WasSyncBootstrap {
  * bootstrap warns and skips).
  *
  * @param options {object}
- * @param options.remoteStore {WasRemoteStore}
- * @param options.collections {WasCollectionConfig[]}
+ * @param options.remoteStore {PwsRemoteStore}
+ * @param options.collections {PwsCollectionConfig[]}
  * @param options.parsed {ParsedGrants}
  * @param [options.knownDescriptors] {Record<string, CollectionEncryption>}
  *   descriptors already read live in this bring-up, reused instead of re-read
@@ -91,7 +91,7 @@ export interface WasSyncBootstrap {
  *   skipped for a known descriptor) and the descriptor known for it (absent
  *   for a public one, or one carrying none)
  * @returns {Promise<DescriptorReadOutcome>}   the epoch-bearing descriptors,
- *   keyed by WAS collection id, and the collections whose read or hook failed
+ *   keyed by PWS collection id, and the collections whose read or hook failed
  */
 async function readGrantedEncryption({
   remoteStore,
@@ -100,12 +100,12 @@ async function readGrantedEncryption({
   knownDescriptors = {},
   onCollection
 }: {
-  remoteStore: WasRemoteStore
-  collections: WasCollectionConfig[]
+  remoteStore: PwsRemoteStore
+  collections: PwsCollectionConfig[]
   parsed: ParsedGrants
   knownDescriptors?: Record<string, CollectionEncryption>
   onCollection?: (options: {
-    collection: WasCollectionConfig
+    collection: PwsCollectionConfig
     encryption?: CollectionEncryption
     current?: CollectionMetaRead
   }) => Promise<void>
@@ -187,12 +187,12 @@ async function readGrantedEncryption({
  */
 export type DescriptorReadOutcome = {
   descriptors: Record<string, CollectionEncryption>
-  failures: Array<{ collection: WasCollectionConfig; err: unknown }>
+  failures: Array<{ collection: PwsCollectionConfig; err: unknown }>
 }
 
 /**
  * One live encryption-descriptor read per granted private collection, invoked
- * with the grants' delegated zcaps and keyed by WAS collection id. Used at
+ * with the grants' delegated zcaps and keyed by PWS collection id. Used at
  * login time, BEFORE any replication exists: the connected replica must open
  * epoch-aware -- epoch-from-birth leaves no single-key fallback, and the
  * adoption merge writes into it before sync starts. The sync bootstrap reuses
@@ -206,7 +206,7 @@ export type DescriptorReadOutcome = {
  * @param options {object}
  * @param options.parsed {ParsedGrants}
  * @param options.zcapClient {ZcapClient}   invocation signer = grants' controller
- * @param options.collections {WasCollectionConfig[]}   the collections to read
+ * @param options.collections {PwsCollectionConfig[]}   the collections to read
  *   descriptors for (public ones are skipped)
  * @param [options.trust] {SpaceTrust}   the activation's Space trust state
  *   (owner view, chain-head pins), shared with the sync bootstrap's store so
@@ -222,10 +222,10 @@ export async function readRemoteDescriptors({
 }: {
   parsed: ParsedGrants
   zcapClient: ZcapClient
-  collections: WasCollectionConfig[]
+  collections: PwsCollectionConfig[]
   trust?: SpaceTrust
 }): Promise<DescriptorReadOutcome> {
-  const remoteStore = WasRemoteStore.fromGrants({
+  const remoteStore = PwsRemoteStore.fromGrants({
     parsed,
     zcapClient,
     collections,
@@ -249,7 +249,7 @@ export async function readRemoteDescriptors({
  * @param options {object}
  * @param options.parsed {ParsedGrants}
  * @param options.zcapClient {ZcapClient}   invocation signer = grants' controller
- * @param options.collections {WasCollectionConfig[]}   the collection registry;
+ * @param options.collections {PwsCollectionConfig[]}   the collection registry;
  *   public (plaintext) collections are never marked encrypted
  * @param options.localStore {LocalStore}   the opened local encrypted replica
  * @param options.syncController {SyncController}   a fresh per-session controller
@@ -266,7 +266,7 @@ export async function readRemoteDescriptors({
  * @param [options.onAuthError] {() => void}   fired when replication hits a
  *   401/403 (expired/revoked access) -- wired to the reconnect banner
  * @param [options.onDescriptorsFetched] {(descriptors) => void | Promise<void>}   given
- *   the freshly fetched per-collection encryption descriptors (by WAS collection
+ *   the freshly fetched per-collection encryption descriptors (by PWS collection
  *   id), to refresh the offline descriptor cache
  * @param [options.knownDescriptors] {Record<string, CollectionEncryption>}
  *   descriptors the caller ALREADY read live in this same bring-up (the
@@ -278,9 +278,9 @@ export async function readRemoteDescriptors({
  *   (the one the login-time {@link readRemoteDescriptors} pass resolved the
  *   owner into and pinned into), so every governed read of this session
  *   checks one owner and one continuity
- * @returns {Promise<WasSyncBootstrap>}
+ * @returns {Promise<PwsSyncBootstrap>}
  */
-export async function startWasSync({
+export async function startPwsSync({
   parsed,
   zcapClient,
   collections,
@@ -296,7 +296,7 @@ export async function startWasSync({
 }: {
   parsed: ParsedGrants
   zcapClient: ZcapClient
-  collections: WasCollectionConfig[]
+  collections: PwsCollectionConfig[]
   localStore: LocalStore
   syncController: SyncController
   onRemoteChange: (collectionKey: string, change: ReplicaChange) => void
@@ -311,8 +311,8 @@ export async function startWasSync({
   ) => void | Promise<void>
   knownDescriptors?: Record<string, CollectionEncryption>
   trust?: SpaceTrust
-}): Promise<WasSyncBootstrap> {
-  const remoteStore = WasRemoteStore.fromGrants({
+}): Promise<PwsSyncBootstrap> {
+  const remoteStore = PwsRemoteStore.fromGrants({
     parsed,
     zcapClient,
     collections,
@@ -331,7 +331,7 @@ export async function startWasSync({
   // descriptor was not known). Together they feed:
   //
   // - the best-effort public `plaintext` indexes declaration, a
-  //   read-modify-write of the object the pass read, since under WAS v0.5 the
+  //   read-modify-write of the object the pass read, since under PWS v0.5 the
   //   object is replaced whole and a partial body would clear the members
   //   this app never touched. Non-fatal (a query against undeclared indexes
   //   fails with a descriptive 400), and skipped (reported ok + skipped) for

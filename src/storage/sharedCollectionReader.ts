@@ -21,7 +21,7 @@
  *
  * The stored resource body IS the EDV envelope the wallet's replication moved
  * verbatim, so reads must be RAW: the handle is opened with the
- * `encryption: 'plaintext'` override (the `WasClient`'s own encryption provider
+ * `encryption: 'plaintext'` override (the `PwsClient`'s own encryption provider
  * is a deliberate no-op keystore) and the envelope is decrypted locally with a
  * cipher built from the collection's `encryption` descriptor.
  *
@@ -35,8 +35,8 @@
  *   roster), which are never re-encrypted and will not decrypt here. That is
  *   expected, not corruption -- they are skipped with a warning.
  */
-import { NotImplementedError } from '@interop/was-client'
-import type { Collection } from '@interop/was-client'
+import { NotImplementedError } from '@interop/pws-client'
+import type { Collection } from '@interop/pws-client'
 import type {
   IKeyAgreementKey,
   IKeyResolver
@@ -45,14 +45,14 @@ import {
   createRefreshingEdvDocCipher,
   type EncryptionDescriptorCache,
   type EncryptionDescriptorSource
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import {
   isEncryptedEnvelope,
   isIntegrityError,
   type DocCipher
-} from '@interop/was-client/sync'
-import type { Json } from '@interop/was-sync'
-import type { WasRemoteStore } from './wasRemoteStore.js'
+} from '@interop/pws-client/sync'
+import type { Json } from '@interop/pws-sync'
+import type { PwsRemoteStore } from './pwsRemoteStore.js'
 import {
   fetchErrorSink,
   isDescriptorRefusal,
@@ -69,7 +69,7 @@ import { log } from '../log.js'
 export const SHARED_CHANGES_PAGE_SIZE = 100
 
 /**
- * One decrypted resource of a shared collection: the WAS resource id (the
+ * One decrypted resource of a shared collection: the PWS resource id (the
  * envelope id, opaque) and its decrypted payload.
  */
 export interface SharedResource {
@@ -90,9 +90,26 @@ export class SharedCollectionUnavailableError extends Error {
   }
 }
 
+/**
+ * True for an envelope this app opened but whose binding the client does not
+ * admit: a `pws` protected-header member that is absent or lacks its scheme
+ * version or epoch (a writer on an earlier envelope format), or a scheme
+ * version newer than this client implements. pws-client raises a bare
+ * `EncryptionError` for those, and for a chunked-blob read failure, which does
+ * not occur here (see {@link SharedCollectionReader.#decryptBody}). Matched on
+ * the exact name, since `KeyUnwrapError` and `IntegrityError` subclass it and
+ * mean something else here.
+ *
+ * @param err {unknown}
+ * @returns {boolean}
+ */
+function isIncompatibleEnvelope(err: unknown): boolean {
+  return err instanceof Error && err.name === 'EncryptionError'
+}
+
 export class SharedCollectionReader {
   readonly collectionId: string
-  readonly #remoteStore: WasRemoteStore
+  readonly #remoteStore: PwsRemoteStore
   // Self-refreshing: it acquires the collection's descriptor when it is built
   // and, on a decrypt that meets an unknown key epoch, re-reads the descriptor,
   // swaps itself, and retries that decrypt -- exactly once per reader. An epoch
@@ -114,7 +131,7 @@ export class SharedCollectionReader {
     pageSize
   }: {
     collectionId: string
-    remoteStore: WasRemoteStore
+    remoteStore: PwsRemoteStore
     cipher: DocCipher
     pageSize: number
   }) {
@@ -134,10 +151,10 @@ export class SharedCollectionReader {
    * any epoch (this app is not, or is no longer, in the roster).
    *
    * @param options {object}
-   * @param options.remoteStore {WasRemoteStore}   the delegated remote store
+   * @param options.remoteStore {PwsRemoteStore}   the delegated remote store
    * @param options.keyAgreementKey {IKeyAgreementKey}   this app's IDENTITY KAK
    * @param options.keyResolver {IKeyResolver}   its one-key resolver
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param [options.pageSize] {number}   `changes`-feed page size (defaults to
    *   {@link SHARED_CHANGES_PAGE_SIZE})
    * @returns {Promise<SharedCollectionReader>}
@@ -149,7 +166,7 @@ export class SharedCollectionReader {
     collectionId,
     pageSize = SHARED_CHANGES_PAGE_SIZE
   }: {
-    remoteStore: WasRemoteStore
+    remoteStore: PwsRemoteStore
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
     collectionId: string
@@ -217,7 +234,7 @@ export class SharedCollectionReader {
   }
 
   /**
-   * The fast path: was-client's `documents()` walk over the `changes` feed,
+   * The fast path: pws-client's `documents()` walk over the `changes` feed,
    * which pages the feed to its end, keeps only live JSON Resources (the
    * Collection's own records, tombstones, and binary or `text/jsonl` Resources
    * drop out, a rewritten id keeps its last body), and returns each stored
@@ -228,19 +245,9 @@ export class SharedCollectionReader {
   async #listViaChanges(collection: Collection): Promise<SharedResource[]> {
     const documents =
       (await collection.documents({ limit: this.#pageSize })) ?? []
-    // Decrypt the collected bodies concurrently: each is an independent unwrap
-    // with no ordering dependency, so serializing the per-body WebCrypto work
-    // would only add latency to the read.
-    const decrypted = await Promise.all(
-      documents.map(async ({ id, data }) => {
-        const payload = await this.#decryptForListing({
-          id,
-          body: data as Json
-        })
-        return payload === undefined ? null : { id, data: payload }
-      })
+    return await this.#decryptListing(
+      documents.map(({ id, data }) => ({ id, read: async () => data as Json }))
     )
-    return decrypted.filter(resource => resource !== null)
   }
 
   /**
@@ -250,27 +257,60 @@ export class SharedCollectionReader {
   async #listViaResources(collection: Collection): Promise<SharedResource[]> {
     const listing = await collection.list()
     const items = listing?.items ?? []
-    // Fetch and decrypt the resources concurrently: each is an independent
-    // request plus unwrap, and `Promise.all` keeps the listing order.
-    const resources = await Promise.all(
-      items.map(async item => {
-        const body = (await collection.get(item.id)) as Json | null
-        const decrypted = await this.#decryptForListing({ id: item.id, body })
-        return decrypted === undefined ? null : { id: item.id, data: decrypted }
-      })
+    return await this.#decryptListing(
+      items.map(({ id }) => ({
+        id,
+        read: async () => (await collection.get(id)) as Json | null
+      }))
     )
-    return resources.filter(resource => resource !== null)
   }
 
   /**
-   * Reads and decrypts one resource of the shared collection by its WAS
+   * Ends a listing: reads and decrypts each entry, dropping what
+   * {@link SharedCollectionReader.#decryptForListing} skips. Incompatible
+   * envelopes are skipped so that one stale resource leaves the rest readable,
+   * but a listing that decoded nothing and skipped at least one rejects with
+   * the first: answering `[]` would make a wallet on another envelope format
+   * read as an empty collection.
+   *
+   * @param entries {Array<{id: string, read: Function}>}   each resource id,
+   *   with what reads its stored body
+   * @returns {Promise<SharedResource[]>}
+   */
+  async #decryptListing(
+    entries: Array<{ id: string; read: () => Promise<Json | null> }>
+  ): Promise<SharedResource[]> {
+    const incompatible: unknown[] = []
+    // Read and decrypt the entries concurrently: each is an independent unwrap
+    // (plus a request on the slow path), and `Promise.all` keeps the listing
+    // order.
+    const resources = await Promise.all(
+      entries.map(async ({ id, read }) => {
+        const data = await this.#decryptForListing({
+          id,
+          body: await read(),
+          incompatible
+        })
+        return data === undefined ? null : { id, data }
+      })
+    )
+    const listed = resources.filter(resource => resource !== null)
+    if (listed.length === 0 && incompatible.length > 0) {
+      throw incompatible[0]
+    }
+    return listed
+  }
+
+  /**
+   * Reads and decrypts one resource of the shared collection by its PWS
    * resource id. Returns `undefined` for a missing resource, a body that is
    * not an EDV envelope, or an envelope this app cannot decrypt (each warned
    * about, distinguishably). An envelope sealed for a different resource id
-   * raises `IntegrityError`: the caller asked for this one resource, so a
+   * raises `IntegrityError`, and one whose binding the client does not admit
+   * raises `EncryptionError`: the caller asked for this one resource, so a
    * silent `undefined` would read as "not there".
    *
-   * @param resourceId {string}   the WAS resource id
+   * @param resourceId {string}   the PWS resource id
    * @returns {Promise<Json | undefined>}
    */
   async get(resourceId: string): Promise<Json | undefined> {
@@ -292,7 +332,7 @@ export class SharedCollectionReader {
           `"${this.collectionId}".`
       )
     }
-    return this.#remoteStore.was
+    return this.#remoteStore.pws
       .spaceAt(this.#remoteStore.spaceUrl)
       .collection(this.collectionId, { capability, encryption: 'plaintext' })
   }
@@ -325,7 +365,7 @@ export class SharedCollectionReader {
    * ({@link SharedCollectionReader.#decryptForListing}).
    *
    * @param options {object}
-   * @param options.id {string}   the WAS resource id the body was read under
+   * @param options.id {string}   the PWS resource id the body was read under
    * @param options.body {Json | null}
    * @returns {Promise<Json | undefined>}
    */
@@ -348,15 +388,15 @@ export class SharedCollectionReader {
       return undefined
     }
     try {
-      // `id` is the WAS resource id this body was read under -- required so
+      // `id` is the PWS resource id this body was read under -- required so
       // the cipher's binding check runs. No collection read through a
       // `SharedCollectionReader` writes chunked (binary) documents, so the
       // `Blob` member of the upstream return type never occurs here.
       return (await this.#cipher.decrypt({ id, envelope: body })) as Json
     } catch (err) {
-      // Not one of the tolerated non-results: the body was not sealed for the
-      // id it was read under.
-      if (isIntegrityError(err)) {
+      // Not tolerated non-results: the body was not sealed for the id it was
+      // read under, or its envelope format is one this client does not admit.
+      if (isIntegrityError(err) || isIncompatibleEnvelope(err)) {
         throw err
       }
       return this.#skipUndecryptable({ id, err })
@@ -370,23 +410,39 @@ export class SharedCollectionReader {
    * them must not make a wallet-owned collection this app can neither repair
    * nor route around unlistable. The skip is logged at `error` rather than
    * `warn`, because unlike the non-results `#decryptBody` absorbs it is never
-   * expected.
+   * expected. An incompatible envelope is skipped the same way and recorded on
+   * `incompatible`, for {@link SharedCollectionReader.#decryptListing} to
+   * report.
    *
    * @param options {object}
-   * @param options.id {string}   the WAS resource id the body was read under
+   * @param options.id {string}   the PWS resource id the body was read under
    * @param options.body {Json | null}
+   * @param options.incompatible {unknown[]}   collects the error of each
+   *   incompatible envelope this listing skipped
    * @returns {Promise<Json | undefined>}
    */
   async #decryptForListing({
     id,
-    body
+    body,
+    incompatible
   }: {
     id: string
     body: Json | null
+    incompatible: unknown[]
   }): Promise<Json | undefined> {
     try {
       return await this.#decryptBody({ id, body })
     } catch (err) {
+      if (isIncompatibleEnvelope(err)) {
+        incompatible.push(err)
+        log.error(
+          'Skipping a resource of a shared collection: its envelope format ' +
+            'is one this client does not admit, so the wallet that wrote it ' +
+            'or this app needs an update.',
+          { resourceId: id, collectionId: this.collectionId, err }
+        )
+        return undefined
+      }
       if (!isIntegrityError(err)) {
         throw err
       }

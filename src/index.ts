@@ -4,7 +4,7 @@
 /**
  * `@interop/was-react`: build "Bring Your Own Everything" (BYOE) apps on Wallet
  * Attached Storage -- DID-Auth login via a CHAPI wallet, local-first encrypted
- * storage, and background sync to a WAS server.
+ * storage, and background sync to a PWS server.
  *
  * This is the core entry. The optional MUI + react-router components live at
  * `@interop/was-react/mui`; the Node-only dev-grant provisioner lives at
@@ -23,11 +23,11 @@ export {
   DEFAULT_EXPIRY_WATCH_MS,
   validateCollections,
   validateSharedCollections,
-  type WasCollectionConfig,
+  type PwsCollectionConfig,
   type SharedCollectionConfig,
-  type WasSyncConfig,
-  type WasExpiryConfig,
-  type WasAppConfig,
+  type PwsSyncConfig,
+  type PwsExpiryConfig,
+  type PwsAppConfig,
   type StoreRegistryEntry,
   type StoreRegistry
 } from './config.js'
@@ -109,7 +109,7 @@ export type {
   IZcap
 } from './auth/walletRequestTypes.js'
 
-// The RxDB-WAS replication driver lives in `@interop/was-sync` and is no
+// The RxDB-PWS replication driver lives in `@interop/pws-sync` and is no
 // longer re-exported here; import it from there (its root entry for the types,
 // the schema, the conflict-handler seam and the writer-id mint, `./rxdb` for
 // the handlers, the replication wiring and the controller core).
@@ -119,7 +119,7 @@ export type {
 // remote store, sync status, and the replication controller.
 //
 // `LocalStore` and `SyncController` load `rxdb` (and the driver subpath
-// `@interop/was-sync/rxdb`) inside `init()` / `start()` rather than at module
+// `@interop/pws-sync/rxdb`) inside `init()` / `start()` rather than at module
 // evaluation, so this entry resolves with the optional `rxdb` peer absent: a
 // replica-less app (shared-collection reads only) installs without it.
 export {
@@ -127,8 +127,8 @@ export {
   type ReplicaStorage,
   type ReplicaChange
 } from './storage/localStore.js'
-// The per-collection document cipher and the WAS sync port stay here: they
-// bridge the driver to `@interop/was-client` and hold this library's key
+// The per-collection document cipher and the PWS sync port stay here: they
+// bridge the driver to `@interop/pws-client` and hold this library's key
 // handling, which the driver never touches.
 export {
   createDocCipher,
@@ -136,7 +136,7 @@ export {
   createUnprovisionedDocCipher,
   type DocCipher
 } from './storage/docCipher.js'
-export { createWasSyncPort } from './storage/wasSyncPort.js'
+export { createPwsSyncPort } from './storage/pwsSyncPort.js'
 // Re-exported beside `LocalStore` (with `deriveIdentity` and
 // `createDescriptorCache` above) so a consumer handed the store directly is
 // also handed everything needed to provision one under epoch-from-birth.
@@ -157,10 +157,10 @@ export {
 export { getWriterId, clearPersistedWriterId } from './storage/writerId.js'
 export { createEntityStore, type EntityStore } from './storage/entityStore.js'
 export {
-  WasRemoteStore,
+  PwsRemoteStore,
   type DeclarationResult,
   type EqualityQueryPage
-} from './storage/wasRemoteStore.js'
+} from './storage/pwsRemoteStore.js'
 export {
   SharedCollectionReader,
   SharedCollectionUnavailableError,
@@ -181,7 +181,7 @@ export {
   type SyncStatusStore
 } from './storage/syncStatusStore.js'
 export { SyncController } from './storage/syncController.js'
-export { startWasSync, type WasSyncBootstrap } from './storage/wasSync.js'
+export { startPwsSync, type PwsSyncBootstrap } from './storage/pwsSync.js'
 export { createSpaceTrust, type SpaceTrust } from './storage/spaceTrust.js'
 export { acquireGovernedDescriptor } from './storage/governedDescriptors.js'
 export { resolveSpaceOwner } from './identity/spaceOwner.js'
@@ -194,15 +194,15 @@ export {
   snapshotWipeTargets,
   type SessionStatus,
   type AuthState,
-  type WasAuthStore,
+  type PwsAuthStore,
   type LocalWipeReport,
   type WipeTargets
 } from './session/index.js'
 
 // React: the session provider + hooks.
 export {
-  WasSessionProvider,
-  WasSessionContext,
+  PwsSessionProvider,
+  PwsSessionContext,
   useAuthStore,
   useSession,
   useLogin,

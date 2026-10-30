@@ -72,12 +72,12 @@ export interface LoginConfig {
    */
   appUrl: string
   /**
-   * The collections to request read/write grants for (WAS collection id +
+   * The collections to request read/write grants for (PWS collection id +
    * visibility; `'public'` selects the `https://w3id.org/byoe#public-collection` descriptor).
    */
   collections: GrantRequestCollection[]
   /**
-   * WAS collection ids of wallet-owned collections to request read-and-decrypt
+   * PWS collection ids of wallet-owned collections to request read-and-decrypt
    * access to (the `https://w3id.org/byoe#shared-wallet-collection` grant).
    * Read-only; never replicated.
    */

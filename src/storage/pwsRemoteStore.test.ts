@@ -8,9 +8,9 @@ import type {
   IKeyResolver,
   IZcap
 } from '@interop/data-integrity-core'
-import { NotImplementedError, WasServerError } from '@interop/was-client'
-import type { CollectionMetadata } from '@interop/was-client'
-import { WasRemoteStore } from './wasRemoteStore.js'
+import { NotImplementedError, PwsServerError } from '@interop/pws-client'
+import type { CollectionMetadata } from '@interop/pws-client'
+import { PwsRemoteStore } from './pwsRemoteStore.js'
 import { createSpaceTrust } from './spaceTrust.js'
 import type { ParsedGrants } from '../grants.js'
 import { resolveSpaceOwner } from '../identity/spaceOwner.js'
@@ -142,14 +142,14 @@ const identityKeys = {
 }
 
 /**
- * Replaces the store's `WasClient` with a stand-in whose
+ * Replaces the store's `PwsClient` with a stand-in whose
  * `space().collection()` chain answers from `handlers`, capturing the handle
  * arguments and every `find` / `declareIndexes` call. The codec is what would
  * blind the terms and decrypt the results; faking at the handle boundary keeps
  * the assertions on this library's own routing.
  */
 function fakeCollectionHandle(
-  store: WasRemoteStore,
+  store: PwsRemoteStore,
   handlers: {
     find?: (options: Record<string, unknown>) => Promise<unknown>
     indexes?: () => Promise<Array<{ attribute: string | string[] }>>
@@ -183,7 +183,7 @@ function fakeCollectionHandle(
         Promise.resolve({ revision: 1, indexes: [] }))
     }
   }
-  const was = {
+  const pws = {
     spaceAt: (spaceUrl: string) => {
       calls.spaceUrl = spaceUrl
       return {
@@ -198,7 +198,7 @@ function fakeCollectionHandle(
       }
     }
   }
-  ;(store as unknown as { was: unknown }).was = was
+  ;(store as unknown as { pws: unknown }).pws = pws
   return calls
 }
 
@@ -213,9 +213,9 @@ async function sourceOptions() {
   return calls[calls.length - 1]![0]
 }
 
-describe('WasRemoteStore.descriptorSource', () => {
+describe('PwsRemoteStore.descriptorSource', () => {
   it('is a verifying source, built once per store', () => {
-    const remoteStore = WasRemoteStore.fromGrants({ parsed, zcapClient })
+    const remoteStore = PwsRemoteStore.fromGrants({ parsed, zcapClient })
     const source = remoteStore.descriptorSource
     expect(source.verifiesHistory).toBe(true)
     expect(remoteStore.descriptorSource).toBe(source)
@@ -227,7 +227,7 @@ describe('WasRemoteStore.descriptorSource', () => {
     owner
       .mockRejectedValueOnce(new Error('server unreachable'))
       .mockResolvedValue({ did: 'did:webvh:x', log: [] } as never)
-    void WasRemoteStore.fromGrants({ parsed, zcapClient }).descriptorSource
+    void PwsRemoteStore.fromGrants({ parsed, zcapClient }).descriptorSource
     const { resolveController } = await sourceOptions()
     await expect(resolveController()).rejects.toThrow('server unreachable')
     // The rejection is not remembered: the next read resolves again.
@@ -241,10 +241,10 @@ describe('WasRemoteStore.descriptorSource', () => {
     owner.mockReset()
     owner.mockResolvedValue({ did: 'did:webvh:x', log: [] } as never)
     const trust = createSpaceTrust(parsed)
-    void WasRemoteStore.fromGrants({ parsed, zcapClient, trust })
+    void PwsRemoteStore.fromGrants({ parsed, zcapClient, trust })
       .descriptorSource
     const first = await sourceOptions()
-    void WasRemoteStore.fromGrants({ parsed, zcapClient, trust })
+    void PwsRemoteStore.fromGrants({ parsed, zcapClient, trust })
       .descriptorSource
     const second = await sourceOptions()
     expect(first.pinStore).toBe(trust.pinStore)
@@ -255,7 +255,7 @@ describe('WasRemoteStore.descriptorSource', () => {
   })
 })
 
-describe('WasRemoteStore.readCollectionMeta', () => {
+describe('PwsRemoteStore.readCollectionMeta', () => {
   it('returns the whole stored object, custom raw, with its validator', async () => {
     // The stored (opaque) envelope, NOT the decoded plaintext: it is what the
     // local store's cipher decodes itself to recover the index schema.
@@ -272,7 +272,7 @@ describe('WasRemoteStore.readCollectionMeta', () => {
         }
       }
     ])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
+    const store = PwsRemoteStore.fromGrants({ parsed, zcapClient: stub })
     expect(await store.readCollectionMeta('notes')).toEqual({
       description: {
         id: 'notes',
@@ -292,7 +292,7 @@ describe('WasRemoteStore.readCollectionMeta', () => {
 
   it('returns undefined when no capability covers the collection', async () => {
     const { calls, zcapClient: stub } = stubZcapClient([{ status: 200 }])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
+    const store = PwsRemoteStore.fromGrants({ parsed, zcapClient: stub })
     expect(await store.readCollectionMeta('ungranted')).toBeUndefined()
     expect(calls).toHaveLength(0)
   })
@@ -302,7 +302,7 @@ describe('WasRemoteStore.readCollectionMeta', () => {
     const { calls, zcapClient: stub } = stubZcapClient([
       { status: 404, error: notFound }
     ])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
+    const store = PwsRemoteStore.fromGrants({ parsed, zcapClient: stub })
     expect(await store.readCollectionMeta('notes')).toBeUndefined()
     expect(calls).toHaveLength(1)
   })
@@ -311,7 +311,7 @@ describe('WasRemoteStore.readCollectionMeta', () => {
     const { calls, zcapClient: stub } = stubZcapClient([
       { status: 501, error: new NotImplementedError('no meta') }
     ])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
+    const store = PwsRemoteStore.fromGrants({ parsed, zcapClient: stub })
     expect(await store.readCollectionMeta('notes')).toBeUndefined()
     expect(calls).toHaveLength(1)
   })
@@ -321,20 +321,20 @@ describe('WasRemoteStore.readCollectionMeta', () => {
     const { calls, zcapClient: stub } = stubZcapClient([
       { status: 502, error: badGateway }
     ])
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient: stub })
+    const store = PwsRemoteStore.fromGrants({ parsed, zcapClient: stub })
     const err = (await store.readCollectionMeta('notes').then(
       () => undefined,
       (err: unknown) => err
     )) as Error
     expect(err).toBeInstanceOf(Error)
     expect(err.message).toContain('"notes"')
-    expect(err.cause).toBeInstanceOf(WasServerError)
-    expect((err.cause as WasServerError).status).toBe(502)
+    expect(err.cause).toBeInstanceOf(PwsServerError)
+    expect((err.cause as PwsServerError).status).toBe(502)
     expect(calls).toHaveLength(1)
   })
 })
 
-describe('WasRemoteStore.declareCollectionIndexes', () => {
+describe('PwsRemoteStore.declareCollectionIndexes', () => {
   const collections = [
     {
       key: 'posts',
@@ -345,7 +345,7 @@ describe('WasRemoteStore.declareCollectionIndexes', () => {
   ]
 
   it('skips a private collection and a public one without indexes', async () => {
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [
@@ -369,7 +369,7 @@ describe('WasRemoteStore.declareCollectionIndexes', () => {
 
   it('merges the indexes into the object it was handed, pinned to its validator', async () => {
     const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -409,7 +409,7 @@ describe('WasRemoteStore.declareCollectionIndexes', () => {
     // The server may echo the expanded form of a bare-string entry; that is
     // the same declaration, not drift.
     const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -434,7 +434,7 @@ describe('WasRemoteStore.declareCollectionIndexes', () => {
 
   it('writes over a stale declaration, keeping the rest of plaintext', async () => {
     const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -459,7 +459,7 @@ describe('WasRemoteStore.declareCollectionIndexes', () => {
   it('refuses the write when the read served no validator', async () => {
     // An unpinned write could silently overwrite a concurrent change.
     const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -481,7 +481,7 @@ describe('WasRemoteStore.declareCollectionIndexes', () => {
   it('refuses the write when the metadata object was not read', async () => {
     // Writing the list alone would replace the whole object with it.
     const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -493,7 +493,7 @@ describe('WasRemoteStore.declareCollectionIndexes', () => {
   })
 
   it('rebases a lost race on a fresh read and writes again', async () => {
-    // was-client's compare-and-swap: the pinned PUT loses (412), the object
+    // pws-client's compare-and-swap: the pinned PUT loses (412), the object
     // is re-read, and the declaration is merged over what landed meanwhile.
     const stale = Object.assign(new Error('Precondition Failed'), {
       status: 412
@@ -512,7 +512,7 @@ describe('WasRemoteStore.declareCollectionIndexes', () => {
       },
       { status: 204, etag: '"v3"' }
     ])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -539,7 +539,7 @@ describe('WasRemoteStore.declareCollectionIndexes', () => {
     const { calls, zcapClient: stub } = stubZcapClient([
       { status: 412, error: stale }
     ])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -556,7 +556,7 @@ describe('WasRemoteStore.declareCollectionIndexes', () => {
   })
 })
 
-describe('WasRemoteStore.queryCollectionByEquality', () => {
+describe('PwsRemoteStore.queryCollectionByEquality', () => {
   const collections = [
     {
       key: 'posts',
@@ -581,7 +581,7 @@ describe('WasRemoteStore.queryCollectionByEquality', () => {
         }
       }
     ])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -614,7 +614,7 @@ describe('WasRemoteStore.queryCollectionByEquality', () => {
     const { calls, zcapClient: stub } = stubZcapClient([
       { status: 200, data: { documents: [], hasMore: false } }
     ])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -630,7 +630,7 @@ describe('WasRemoteStore.queryCollectionByEquality', () => {
 
   it('fails closed before any request on invalid queries', async () => {
     const { calls, zcapClient: stub } = stubZcapClient([{ status: 200 }])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -660,7 +660,7 @@ describe('WasRemoteStore.queryCollectionByEquality', () => {
     const { zcapClient: stub } = stubZcapClient([
       { status: 200, data: { items: [] } }
     ])
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient: stub,
       collections
@@ -674,13 +674,13 @@ describe('WasRemoteStore.queryCollectionByEquality', () => {
   })
 })
 
-describe('WasRemoteStore.queryCollectionByEquality (blinded)', () => {
+describe('PwsRemoteStore.queryCollectionByEquality (blinded)', () => {
   const collections = [
     { key: 'notes', id: 'notes', indexes: ['author', 'inReplyTo'] }
   ]
 
   it('runs the blinded find and maps the page', async () => {
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections,
@@ -729,7 +729,7 @@ describe('WasRemoteStore.queryCollectionByEquality (blinded)', () => {
   })
 
   it('omits limit and cursor when they were not given', async () => {
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections,
@@ -747,7 +747,7 @@ describe('WasRemoteStore.queryCollectionByEquality (blinded)', () => {
   })
 
   it('fails closed on an empty term set and an undeclared attribute', async () => {
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections,
@@ -769,7 +769,7 @@ describe('WasRemoteStore.queryCollectionByEquality (blinded)', () => {
   it('fails closed when no identity keys were supplied', async () => {
     // No `keys`: the client's keystore cannot build a codec, so nothing could
     // blind the terms or decrypt the results.
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections
@@ -785,7 +785,7 @@ describe('WasRemoteStore.queryCollectionByEquality (blinded)', () => {
   })
 
   it('fails closed when no grant covers the collection', async () => {
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [{ key: 'other', id: 'ungranted', indexes: ['author'] }],
@@ -800,7 +800,7 @@ describe('WasRemoteStore.queryCollectionByEquality (blinded)', () => {
   })
 })
 
-describe('WasRemoteStore.declareBlindedIndexes', () => {
+describe('PwsRemoteStore.declareBlindedIndexes', () => {
   const epochs = [{ id: 'did:key:zEpoch1', recipients: [] }]
   const withHmac = {
     scheme: 'edv' as const,
@@ -810,7 +810,7 @@ describe('WasRemoteStore.declareBlindedIndexes', () => {
   }
 
   it('skips a public collection and a private one without indexes', async () => {
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [
@@ -835,7 +835,7 @@ describe('WasRemoteStore.declareBlindedIndexes', () => {
   })
 
   it('reports a descriptor with no blinded-index key as not ok', async () => {
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [{ key: 'notes', id: 'notes', indexes: ['author'] }],
@@ -851,7 +851,7 @@ describe('WasRemoteStore.declareBlindedIndexes', () => {
   })
 
   it('declares only the attributes not already persisted', async () => {
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [
@@ -870,7 +870,7 @@ describe('WasRemoteStore.declareBlindedIndexes', () => {
   })
 
   it('declares every missing attribute in one batch call', async () => {
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [
@@ -888,7 +888,7 @@ describe('WasRemoteStore.declareBlindedIndexes', () => {
 
   it('reports no write when every attribute is already persisted', async () => {
     // A returning session: the caller's pre-read `custom` is still current.
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [
@@ -909,7 +909,7 @@ describe('WasRemoteStore.declareBlindedIndexes', () => {
   })
 
   it('reports a failed declaration rather than throwing', async () => {
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [{ key: 'notes', id: 'notes', indexes: ['author'] }],
@@ -928,7 +928,7 @@ describe('WasRemoteStore.declareBlindedIndexes', () => {
   })
 
   it('reports a missing capability and missing identity keys', async () => {
-    const ungranted = WasRemoteStore.fromGrants({
+    const ungranted = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [{ key: 'other', id: 'ungranted', indexes: ['author'] }],
@@ -943,7 +943,7 @@ describe('WasRemoteStore.declareBlindedIndexes', () => {
       ok: false,
       error: 'no capability'
     })
-    const keyless = WasRemoteStore.fromGrants({
+    const keyless = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [{ key: 'notes', id: 'notes', indexes: ['author'] }]
@@ -954,21 +954,21 @@ describe('WasRemoteStore.declareBlindedIndexes', () => {
   })
 })
 
-describe('WasRemoteStore.publicUrlFor', () => {
+describe('PwsRemoteStore.publicUrlFor', () => {
   const collections = [
     { key: 'posts', id: 'microblog-posts', visibility: 'public' as const },
     { key: 'notes', id: 'notes' }
   ]
 
   it('composes the stable resource URL for a public collection', () => {
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient, collections })
+    const store = PwsRemoteStore.fromGrants({ parsed, zcapClient, collections })
     expect(
       store.publicUrlFor({ collectionId: 'microblog-posts', id: 'post-1' })
     ).toBe('https://was.example/space/space-1/microblog-posts/post-1')
   })
 
   it('percent-encodes the resource id', () => {
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient, collections })
+    const store = PwsRemoteStore.fromGrants({ parsed, zcapClient, collections })
     expect(
       store.publicUrlFor({
         collectionId: 'microblog-posts',
@@ -980,7 +980,7 @@ describe('WasRemoteStore.publicUrlFor', () => {
   })
 
   it('throws on a private / unregistered collection', () => {
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient, collections })
+    const store = PwsRemoteStore.fromGrants({ parsed, zcapClient, collections })
     expect(() =>
       store.publicUrlFor({ collectionId: 'notes', id: 'post-1' })
     ).toThrow(/not registered as public/)
@@ -990,7 +990,7 @@ describe('WasRemoteStore.publicUrlFor', () => {
   })
 
   it('throws on an empty id', () => {
-    const store = WasRemoteStore.fromGrants({ parsed, zcapClient, collections })
+    const store = PwsRemoteStore.fromGrants({ parsed, zcapClient, collections })
     expect(() =>
       store.publicUrlFor({ collectionId: 'microblog-posts', id: '' })
     ).toThrow(/non-empty document id/)
@@ -998,7 +998,7 @@ describe('WasRemoteStore.publicUrlFor', () => {
 
   it('throws when no grant covers the collection', () => {
     // Registered public in the config, but no delegated capability covers it.
-    const store = WasRemoteStore.fromGrants({
+    const store = PwsRemoteStore.fromGrants({
       parsed,
       zcapClient,
       collections: [

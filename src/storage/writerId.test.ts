@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * Unit tests for this library's binding over `@interop/was-sync`'s writer-id
+ * Unit tests for this library's binding over `@interop/pws-sync`'s writer-id
  * mint: that it supplies {@link DEFAULT_STORAGE_KEY_PREFIX} and `localStorage`,
  * and that a clear touches only the prefix it was given. The mint's own
  * semantics (mint-once, the fresh-id-per-call answer from a storage that

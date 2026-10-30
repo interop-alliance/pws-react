@@ -8,7 +8,7 @@
  * renders them only once the wallet is connected and otherwise redirects to the
  * login path. Uses react-router's `Navigate` / `Outlet`.
  *
- * Boot is kicked off by {@link WasSessionProvider} on mount, not here, so a
+ * Boot is kicked off by {@link PwsSessionProvider} on mount, not here, so a
  * local-first app that never mounts this component still boots.
  *
  * The fatal-error alert (`data-testid="bootstrap-error"`) is scoped to

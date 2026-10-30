@@ -3,7 +3,7 @@
  */
 /**
  * The key-epoch roster fixture shared by the shared-collection and
- * standing-credential suites: an in-memory descriptor store for was-client's
+ * standing-credential suites: an in-memory descriptor store for pws-client's
  * recipient operations, a one-epoch mint over it, and the rotation that
  * produces a genuine second epoch. One copy, so a change to the recipient
  * operations' signatures lands in both suites at once.
@@ -12,9 +12,9 @@ import {
   initRecipients,
   removeRecipient,
   trustRosterDidKeys
-} from '@interop/was-client/edv'
-import type { EncryptionDescriptorStore } from '@interop/was-client/edv'
-import type { CollectionEncryption } from '@interop/was-client'
+} from '@interop/pws-client/edv'
+import type { EncryptionDescriptorStore } from '@interop/pws-client/edv'
+import type { CollectionEncryption } from '@interop/pws-client'
 
 /**
  * A fixed 32-byte seed for a second identity, so a roster can carry a
@@ -99,7 +99,7 @@ export async function rotateRoster({
  * Copies a roster with one recipient entry's wrapped epoch key damaged: the
  * `encrypted_key` keeps its length and stays valid base64url, so it decodes
  * and then fails the AES-KW integrity check. That is what a corrupt or
- * tampered entry addressed to a reader looks like, and was-client raises
+ * tampered entry addressed to a reader looks like, and pws-client raises
  * `IntegrityError` for it rather than `KeyUnwrapError` (which a malformed
  * entry, or no entry at all, keeps raising).
  *

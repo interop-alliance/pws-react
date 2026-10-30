@@ -40,9 +40,9 @@ export default defineConfig([
     }
   },
   {
-    // `@interop/was-sync/testing` is test fixtures: its fake server accepts
+    // `@interop/pws-sync/testing` is test fixtures: its fake server accepts
     // every write and serves a plausible changes feed, so a production import
-    // would show a healthy sync status over a replica writing nothing to WAS.
+    // would show a healthy sync status over a replica writing nothing to PWS.
     // Restated per file block, since flat config does not merge `rules`
     // options across blocks.
     files: ['src/**/*.ts', 'src/**/*.tsx'],
@@ -53,10 +53,10 @@ export default defineConfig([
         {
           paths: [
             {
-              name: '@interop/was-sync/testing',
+              name: '@interop/pws-sync/testing',
               message:
                 'Test fixtures only. A production import would report a ' +
-                'healthy sync over a replica writing nothing to WAS.'
+                'healthy sync over a replica writing nothing to PWS.'
             }
           ]
         }

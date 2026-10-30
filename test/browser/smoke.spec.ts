@@ -59,11 +59,11 @@ test('the core entry imports and exposes its public API in the browser', async (
         const mod = await import(entry)
         return {
           createAuthStore: typeof mod.createAuthStore,
-          WasSessionProvider: typeof mod.WasSessionProvider,
+          PwsSessionProvider: typeof mod.PwsSessionProvider,
           useSession: typeof mod.useSession,
           loginWithWallet: typeof mod.loginWithWallet,
           SyncController: typeof mod.SyncController,
-          startWasSync: typeof mod.startWasSync,
+          startPwsSync: typeof mod.startPwsSync,
           parseGrants: typeof mod.parseGrants,
           createDocumentLoader: typeof mod.createDocumentLoader,
           DEFAULT_DB_NAME: mod.DEFAULT_DB_NAME
@@ -72,11 +72,11 @@ test('the core entry imports and exposes its public API in the browser', async (
   })
 
   expect(exports.createAuthStore).toBe('function')
-  expect(exports.WasSessionProvider).toBe('function')
+  expect(exports.PwsSessionProvider).toBe('function')
   expect(exports.useSession).toBe('function')
   expect(exports.loginWithWallet).toBe('function')
   expect(exports.SyncController).toBe('function')
-  expect(exports.startWasSync).toBe('function')
+  expect(exports.startPwsSync).toBe('function')
   expect(exports.parseGrants).toBe('function')
   expect(exports.createDocumentLoader).toBe('function')
   expect(exports.DEFAULT_DB_NAME).toBe('was-react')

@@ -31,7 +31,7 @@
  * a shape this library no longer names is out of its reach.
  *
  * What no enumeration here reaches, stated plainly: data already synced to the
- * WAS server (this is a local clear, not an account deletion), forensic
+ * PWS server (this is a local clear, not an account deletion), forensic
  * recoverability of deleted IndexedDB data, and anything the app itself
  * persisted outside this library.
  */

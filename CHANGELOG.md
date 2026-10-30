@@ -4,8 +4,37 @@
 
 ### Changed
 
+- Breaking: the client is now `@interop/pws-client` 0.105.0 (renamed from
+  `@interop/was-client`). The store's `was` member and the `was` option of the
+  sync port factory are now `pws`, and the client's errors surface under their
+  `Pws*` names (`PwsServerError`, `PwsSyncAuthError`, `PwsSyncConflictError`).
+- Breaking: this package's `Was*` exports are renamed to `Pws*`: `PwsAppConfig`,
+  `PwsCollectionConfig`, `PwsSyncConfig`, `PwsExpiryConfig`, `PwsRemoteStore`,
+  `PwsAuthStore`, `PwsSessionProvider`, `PwsSessionContext`, `PwsSyncBootstrap`,
+  `startPwsSync`, and `createPwsSyncPort`. The npm package name is unchanged.
+- Breaking: `defineDocumentApp` export files are tagged `pws-document/v1` in
+  place of `was-document/v1`, and a file carrying the old tag is refused on
+  import.
+- Breaking: encrypted envelopes bind the `pws` JWE protected-header parameter in
+  place of `was`, with no fallback. Envelopes written by earlier versions no
+  longer decrypt, locally or from a server. A private replica holding such rows
+  fails hydration with `EncryptionError`: a connected session lands `local` with
+  `error`, and an anonymous one stays on `boot` with `error`. There is no
+  migration. Only `clearLocalData()` recovers a replica, and a Space sealed
+  under `was` has to be re-provisioned.
+- Breaking: the replication driver is now `@interop/pws-sync` 0.13.0 (renamed
+  from `@interop/was-sync`).
+- `@interop/wallet-core` is now 0.112.0, which is on `@interop/pws-client` too,
+  so a wallet and this library read each other's envelopes.
 - The in-process test server dependency is now `@interop/web-spaces-server`
   0.45.0 (renamed from `was-teaching-server`).
+
+### Fixed
+
+- `SharedCollectionReader` no longer reports an envelope format the client does
+  not admit as an expected legacy resource. `get()` rethrows the
+  `EncryptionError`. A listing skips the resource at `error` level and rejects
+  with that error when it decoded nothing, rather than answering `[]`.
 
 ## 0.32.0 - 2026-10-29
 

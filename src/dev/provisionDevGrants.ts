@@ -44,21 +44,21 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { WasClient, type ActionInput } from '@interop/was-client'
-import { ensureFirstEpoch, ownerRecipient } from '@interop/was-client/edv'
+import { PwsClient, type ActionInput } from '@interop/pws-client'
+import { ensureFirstEpoch, ownerRecipient } from '@interop/pws-client/edv'
 import type { IDelegatedZcap } from '@interop/data-integrity-core'
 import { CapabilityAgent } from '@interop/capability-agent'
-import { agentsFromKeyAgent } from '@interop/was-client/identity'
+import { agentsFromKeyAgent } from '@interop/pws-client/identity'
 import {
   collectionMetaUrl,
   collectionUrl,
   rootCapability
-} from '@interop/was-client/paths'
+} from '@interop/pws-client/paths'
 import {
   ensureSpace,
   ensureSpaceAndCollection,
   errorStatus
-} from '@interop/was-client/sync'
+} from '@interop/pws-client/sync'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import {
   ensurePromotedSpaceController,
@@ -69,7 +69,8 @@ import {
   clientSigningKeyMultibase,
   ensureDidWebvh,
   mintClientWebvhUpdateKeys,
-  wasWebvhIdStore,
+  // wallet-core still exports this builder under its former prefix.
+  wasWebvhIdStore as pwsWebvhIdStore,
   webvhZcapClient
 } from '@interop/wallet-core/webvh'
 import {
@@ -147,7 +148,7 @@ export interface ProvisionDevGrantsResult {
  *   `service`, `spaces/` and `space/{id}/`
  * @param options.seed {Uint8Array}   the app (requester) master seed; the
  *   app DID the grants are delegated to is derived from it
- * @param options.collections {Array<string | object>}   the WAS collections to
+ * @param options.collections {Array<string | object>}   the PWS collections to
  *   create and grant: a bare id string (private by default) or
  *   `{ id, visibility, blindedIndex }`. A private collection is log-governed:
  *   its epoch[0] (sole recipient: the app's identity key-agreement key) is
@@ -231,7 +232,7 @@ export async function provisionDevGrants({
     keyAgreementKey: clientKeyAgreementKey
   } = agentsFromKeyAgent({ keyAgent })
   const { publicKeyMultibase: keyAgreementKeyMultibase } = clientKeyAgreementKey
-  const clientWas = new WasClient({
+  const clientPws = new PwsClient({
     baseServerUrl,
     zcapClient: clientZcapClient
   })
@@ -243,7 +244,7 @@ export async function provisionDevGrants({
   // The one place a Space URL is built rather than received: the dev
   // provisioner holds the base and mints the id, so the client's own layout
   // rule names the Space.
-  const spaceUrl = clientWas.space(spaceId).url
+  const spaceUrl = clientPws.space(spaceId).url
 
   log(`Provisioning against ${baseServerUrl}`)
   log(`  provisioner key: ${clientDid}`)
@@ -256,7 +257,7 @@ export async function provisionDevGrants({
   // Description that already carries a client-written `encryption` member,
   // so the governing log's genesis below is what declares it encrypted.
   const spaceDescription = await ensureSpace({
-    was: clientWas,
+    pws: clientPws,
     spaceUrl,
     controllerDid: clientDid,
     spaceName
@@ -271,7 +272,7 @@ export async function provisionDevGrants({
   })
   await Promise.all([
     ensureSpaceAndCollection({
-      was: clientWas,
+      pws: clientPws,
       spaceUrl,
       controllerDid: clientDid,
       spaceDescription,
@@ -282,7 +283,7 @@ export async function provisionDevGrants({
     }),
     ...entries.map(({ id, visibility }) =>
       ensureSpaceAndCollection({
-        was: clientWas,
+        pws: clientPws,
         spaceUrl,
         controllerDid: clientDid,
         spaceDescription,
@@ -297,7 +298,7 @@ export async function provisionDevGrants({
   // at `/space/{spaceId}/id/did.jsonl` through the account log's chain-head
   // pin.
   const { did } = await ensureDidWebvh({
-    idStore: wasWebvhIdStore({ was: clientWas, spaceId, pinStore }),
+    idStore: pwsWebvhIdStore({ pws: clientPws, spaceId, pinStore }),
     baseServerUrl,
     spaceId,
     clientKeys: {
@@ -344,8 +345,8 @@ export async function provisionDevGrants({
   // run left (confirmed, promoted, or healed through the did:key-signed
   // handle), carrying this Space's own name rather than the wallet's.
   const promotion = await ensurePromotedSpaceController({
-    was: clientWas,
-    wasAsClient: clientWas,
+    pws: clientPws,
+    pwsAsClient: clientPws,
     spaceId,
     did,
     name: spaceName
@@ -359,7 +360,7 @@ export async function provisionDevGrants({
   // collection container URL (canonical trailing slash) then prefix-covers
   // everything the app invokes under it: its resources, the `query`
   // endpoint, the listing, and its Metadata object at `meta`.
-  const owner = new WasClient({
+  const owner = new PwsClient({
     baseServerUrl,
     zcapClient: webvhZcapClient({ keyAgent, did })
   })
@@ -407,7 +408,7 @@ export async function provisionDevGrants({
   // one member left out is `encryption`. On a log-governed collection the
   // server derives it from the `meta/log` head and refuses any write that
   // carries it (409), so echoing it back would read as a refusal.
-  const appWas = new WasClient({ baseServerUrl, zcapClient: appZcapClient })
+  const appPws = new PwsClient({ baseServerUrl, zcapClient: appZcapClient })
   const probeCollectionId = entries[0]!.id
   const probeCapability = grants[0]!
   const probeUrl = collectionMetaUrl({
@@ -416,7 +417,7 @@ export async function provisionDevGrants({
   })
   log(`\nMetadata-write probe on "${probeCollectionId}" (delegated RW zcap):`)
   try {
-    const current = await appWas.request({
+    const current = await appPws.request({
       capability: probeCapability,
       url: probeUrl,
       method: 'GET'
@@ -424,7 +425,7 @@ export async function provisionDevGrants({
     const { encryption: _derived, ...writable } = (current.data ?? {
       id: probeCollectionId
     }) as { encryption?: unknown } & Record<string, unknown>
-    const response = await appWas.request({
+    const response = await appPws.request({
       capability: probeCapability,
       url: probeUrl,
       method: 'PUT',

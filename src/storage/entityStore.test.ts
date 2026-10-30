@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import type { LocalStore } from './localStore.js'
-import type { WasRemoteStore } from './wasRemoteStore.js'
+import type { PwsRemoteStore } from './pwsRemoteStore.js'
 import { StorageContext } from './storageContext.js'
 import {
   activateStorageContext,
@@ -391,7 +391,7 @@ describe('createEntityStore', () => {
     expect(persisted[0]!.updatedAt).not.toBe('1999-01-01T00:00:00.000Z')
   })
 
-  it('query routes key to WAS id and maps the page to payloads', async () => {
+  it('query routes key to PWS id and maps the page to payloads', async () => {
     const store = createEntityStore<Note>('notes')
     context.attachStore({
       collectionConfig: (key: string) => ({
@@ -415,7 +415,7 @@ describe('createEntityStore', () => {
           cursor: 'more'
         }
       }
-    } as unknown as WasRemoteStore)
+    } as unknown as PwsRemoteStore)
 
     const page = await store
       .getState()

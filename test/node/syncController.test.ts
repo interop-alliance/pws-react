@@ -14,32 +14,32 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createSyncController, isAuthError } from '@interop/was-sync/rxdb'
+import { createSyncController, isAuthError } from '@interop/pws-sync/rxdb'
 import { SyncController } from '../../src/storage/syncController.js'
 import {
   createSyncStatusStore,
   deriveSyncRollup,
   type SyncStatusStore
 } from '../../src/storage/syncStatusStore.js'
-import { WasSyncAuthError } from '@interop/was-client/sync'
-import type { WasRemoteStore } from '../../src/storage/wasRemoteStore.js'
+import { PwsSyncAuthError } from '@interop/pws-client/sync'
+import type { PwsRemoteStore } from '../../src/storage/pwsRemoteStore.js'
 import type { LocalStore } from '../../src/storage/localStore.js'
 
 // The core's factory is wrapped, not replaced: every suite here runs against
 // the real core, and the writer-id suite reads the options the binding built.
-vi.mock('@interop/was-sync/rxdb', async importOriginal => {
-  const actual = await importOriginal<typeof import('@interop/was-sync/rxdb')>()
+vi.mock('@interop/pws-sync/rxdb', async importOriginal => {
+  const actual = await importOriginal<typeof import('@interop/pws-sync/rxdb')>()
   return { ...actual, createSyncController: vi.fn(actual.createSyncController) }
 })
 
 const COLLECTIONS = [{ key: 'notes', id: 'notes' }]
 
 /**
- * A remote store whose `collectionCapability` and `was` access are spied so a
+ * A remote store whose `collectionCapability` and `pws` access are spied so a
  * test can assert whether `start()` reached the per-collection build at all.
  */
 function fakeRemoteStore(capabilityFor: (id: string) => object | undefined): {
-  remoteStore: WasRemoteStore
+  remoteStore: PwsRemoteStore
   collectionCapability: ReturnType<typeof vi.fn>
 } {
   const collectionCapability = vi.fn(capabilityFor)
@@ -47,12 +47,12 @@ function fakeRemoteStore(capabilityFor: (id: string) => object | undefined): {
     // The sync port binds its `changes` feed handle at construction, so the
     // fake client has to answer `spaceAt().collection()`; nothing here is
     // called.
-    was: {
+    pws: {
       spaceAt: () => ({ collection: () => ({}) })
     },
     spaceUrl: 'http://localhost:3999/space/space-1/',
     collectionCapability
-  } as unknown as WasRemoteStore
+  } as unknown as PwsRemoteStore
   return { remoteStore, collectionCapability }
 }
 
@@ -111,15 +111,15 @@ describe('SyncController stop-then-start latch', () => {
 })
 
 describe('isAuthError', () => {
-  it('recognises a WasSyncAuthError at the top level', () => {
-    expect(isAuthError(new WasSyncAuthError(403))).toBe(true)
+  it('recognises a PwsSyncAuthError at the top level', () => {
+    expect(isAuthError(new PwsSyncAuthError(403))).toBe(true)
   })
 
-  it('recognises a WasSyncAuthError wrapped in an RxError-like graph', () => {
+  it('recognises a PwsSyncAuthError wrapped in an RxError-like graph', () => {
     // RxDB wraps a thrown push/pull-handler error under `parameters.errors`.
     const rxError = {
       code: 'RC_PUSH',
-      parameters: { errors: [new WasSyncAuthError(401)] }
+      parameters: { errors: [new PwsSyncAuthError(401)] }
     }
     expect(isAuthError(rxError)).toBe(true)
   })
@@ -133,9 +133,9 @@ describe('isAuthError', () => {
       parameters: {
         errors: [
           {
-            name: 'WasSyncAuthError',
-            message: 'WAS storage access denied (HTTP 403).',
-            stack: 'WasSyncAuthError: ...'
+            name: 'PwsSyncAuthError',
+            message: 'PWS storage access denied (HTTP 403).',
+            stack: 'PwsSyncAuthError: ...'
           }
         ]
       }
@@ -143,8 +143,8 @@ describe('isAuthError', () => {
     expect(isAuthError(rxError)).toBe(true)
   })
 
-  it('recognises a WasSyncAuthError nested under `cause`', () => {
-    expect(isAuthError({ cause: { cause: new WasSyncAuthError(401) } })).toBe(
+  it('recognises a PwsSyncAuthError nested under `cause`', () => {
+    expect(isAuthError({ cause: { cause: new PwsSyncAuthError(401) } })).toBe(
       true
     )
   })

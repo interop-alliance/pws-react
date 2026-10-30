@@ -18,12 +18,12 @@ export default defineConfig({
     // optional peer) and which the crawl of the entries above therefore does
     // not reach.
     include: [
-      '@interop/was-sync/rxdb',
+      '@interop/pws-sync/rxdb',
       'rxdb/plugins/core',
       'rxdb/plugins/storage-dexie'
     ]
   },
-  // A linked `@interop/was-sync` checkout would carry its own `rxdb` in its
+  // A linked `@interop/pws-sync` checkout would carry its own `rxdb` in its
   // node_modules, so without this the driver and this library could each
   // hold a physical copy: two sets of RxDB prototypes, with the
   // leader-election plugin installed on only one of them. Installed from the
@@ -31,7 +31,7 @@ export default defineConfig({
   // one copy here, so this entry is a harmless guard against a duplicate
   // copy rather than something a registry install depends on.
   resolve: {
-    dedupe: ['rxdb', '@interop/was-client']
+    dedupe: ['rxdb', '@interop/pws-client']
   },
   // A dedicated port (with strictPort so Vite fails loudly instead of
   // silently drifting to another port) keeps the Playwright suite from

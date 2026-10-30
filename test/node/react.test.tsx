@@ -4,7 +4,7 @@
 /**
  * Provider + hook tests (jsdom): the session provider exposes the initial auth
  * state through `useSession`, and `useAuthStore` throws a helpful error when
- * used outside the provider. No IndexedDB / WAS server is touched -- constructing
+ * used outside the provider. No IndexedDB / PWS server is touched -- constructing
  * the store and reading its initial state is inert.
  *
  * @vitest-environment jsdom
@@ -13,11 +13,11 @@ import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { WasSessionProvider } from '../../src/react/WasSessionProvider.js'
+import { PwsSessionProvider } from '../../src/react/PwsSessionProvider.js'
 import { useAuthStore, useSession } from '../../src/react/hooks.js'
-import type { StoreRegistry, WasAppConfig } from '../../src/config.js'
+import type { StoreRegistry, PwsAppConfig } from '../../src/config.js'
 
-const config: WasAppConfig = {
+const config: PwsAppConfig = {
   appName: 'Test App',
   appOrigin: 'http://localhost:5173',
   collections: [{ key: 'notes', id: 'notes' }],
@@ -28,9 +28,9 @@ const registry: StoreRegistry = {}
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
-    <WasSessionProvider config={config} registry={registry}>
+    <PwsSessionProvider config={config} registry={registry}>
       {children}
-    </WasSessionProvider>
+    </PwsSessionProvider>
   )
 }
 
@@ -38,7 +38,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('WasSessionProvider + useSession', () => {
+describe('PwsSessionProvider + useSession', () => {
   it('exposes the initial (boot) session state', () => {
     const { result } = renderHook(() => useSession(), { wrapper })
     expect(result.current.status).toBe('boot')
@@ -72,7 +72,7 @@ describe('useAuthStore outside a provider', () => {
       useAuthStore()
       return null
     }
-    expect(() => render(<Bare />)).toThrow(/WasSessionProvider/)
+    expect(() => render(<Bare />)).toThrow(/PwsSessionProvider/)
     errorSpy.mockRestore()
   })
 })

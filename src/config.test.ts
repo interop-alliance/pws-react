@@ -6,7 +6,7 @@ import {
   validateCollections,
   validateSharedCollections,
   type SharedCollectionConfig,
-  type WasCollectionConfig
+  type PwsCollectionConfig
 } from './config.js'
 
 describe('validateCollections', () => {
@@ -21,7 +21,7 @@ describe('validateCollections', () => {
     ).not.toThrow()
   })
 
-  it('accepts the same WAS id under two keys with matching visibility', () => {
+  it('accepts the same PWS id under two keys with matching visibility', () => {
     expect(() =>
       validateCollections([
         { key: 'a', id: 'shared', visibility: 'public' },
@@ -39,7 +39,7 @@ describe('validateCollections', () => {
   it('rejects an unknown visibility value (fail-closed)', () => {
     const collections = [
       { key: 'posts', id: 'posts', visibility: 'unlisted' }
-    ] as unknown as WasCollectionConfig[]
+    ] as unknown as PwsCollectionConfig[]
     expect(() => validateCollections(collections)).toThrow(/unknown visibility/)
   })
 
@@ -89,7 +89,7 @@ describe('validateCollections', () => {
     ).toThrow(/twice/)
   })
 
-  it('rejects diverging index declarations for the same private WAS id', () => {
+  it('rejects diverging index declarations for the same private PWS id', () => {
     expect(() =>
       validateCollections([
         { key: 'a', id: 'notes', indexes: ['author'] },
@@ -98,7 +98,7 @@ describe('validateCollections', () => {
     ).toThrow(/diverging index/)
   })
 
-  it('rejects diverging index declarations for the same WAS id', () => {
+  it('rejects diverging index declarations for the same PWS id', () => {
     expect(() =>
       validateCollections([
         { key: 'a', id: 'shared', visibility: 'public', indexes: ['author'] },
@@ -124,7 +124,7 @@ describe('validateCollections', () => {
     ).not.toThrow()
   })
 
-  it('rejects the same WAS id registered as both private and public', () => {
+  it('rejects the same PWS id registered as both private and public', () => {
     expect(() =>
       validateCollections([
         { key: 'a', id: 'shared' },
@@ -141,7 +141,7 @@ describe('validateCollections', () => {
 })
 
 describe('validateSharedCollections', () => {
-  const OWNED: WasCollectionConfig[] = [
+  const OWNED: PwsCollectionConfig[] = [
     { key: 'notes', id: 'notes' },
     { key: 'posts', id: 'microblog-posts', visibility: 'public' }
   ]

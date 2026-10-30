@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * Resolves the did:webvh that owns a WAS Space, from the requester's side.
+ * Resolves the did:webvh that owns a PWS Space, from the requester's side.
  *
  * A requester holds per-collection grants and nothing that names the Space's
  * controller: the grant chain's root names the Space URL and nothing more,

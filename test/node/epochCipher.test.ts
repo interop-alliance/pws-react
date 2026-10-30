@@ -22,12 +22,12 @@ import {
   KeyUnwrapError,
   ownerRecipient,
   UnverifiedDescriptorError
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import { captureLogger } from '@interop/logger'
-import { isIntegrityError } from '@interop/was-client/sync'
-import type { CollectionEncryption } from '@interop/was-client'
+import { isIntegrityError } from '@interop/pws-client/sync'
+import type { CollectionEncryption } from '@interop/pws-client'
 import { LocalStore } from '../../src/storage/localStore.js'
-import type { Json } from '@interop/was-sync'
+import type { Json } from '@interop/pws-sync'
 import { createDocCipher } from '../../src/storage/docCipher.js'
 import {
   corruptRecipientEntry,
@@ -36,10 +36,10 @@ import {
 } from '../fixtures/roster.js'
 import { fakeDescriptorSource } from '../fixtures/descriptorSource.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
-import type { WasCollectionConfig } from '../../src/config.js'
+import type { PwsCollectionConfig } from '../../src/config.js'
 import { setLogger } from '../../src/log.js'
 
-const COLLECTIONS: WasCollectionConfig[] = [{ key: 'notes', id: 'notes' }]
+const COLLECTIONS: PwsCollectionConfig[] = [{ key: 'notes', id: 'notes' }]
 const COLLECTION_KEY = 'notes'
 const COLLECTION_ID = 'notes'
 const SEED = new Uint8Array(32).map((_, index) => (index * 9 + 2) & 0xff)

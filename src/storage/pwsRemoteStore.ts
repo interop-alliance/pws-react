@@ -2,24 +2,24 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * WasRemoteStore (delegated-only): the view of the user's WAS Space held by the
+ * PwsRemoteStore (delegated-only): the view of the user's PWS Space held by the
  * requester (an app, service, or agent), stripped to the delegated model --
  * this app NEVER provisions the Space, never
  * holds a server of its own, and never touches the `id` collection or DID
  * publishing. It receives a set of wallet-delegated zcaps, reads the Space URL
  * off their delegation chain's root ({@link parseGrants}), and holds:
  *
- * - a `WasClient` wrapping the app's own `ZcapClient` (its invocation signer is
+ * - a `PwsClient` wrapping the app's own `ZcapClient` (its invocation signer is
  *   the seed-derived controller the grants were delegated to);
  * - per-collection capability routing, so each sync request invokes the exact
  *   collection grant;
  * - one raw read of a collection's Metadata object
- *   ({@link WasRemoteStore.readCollectionMeta}): the `encryption` descriptor,
+ *   ({@link PwsRemoteStore.readCollectionMeta}): the `encryption` descriptor,
  *   the `plaintext` declaration, and the opaque `custom` envelope arrive as one
  *   object under one validator, so every consumer here reads it once;
  * - two best-effort declarations written back onto that object, each a merge
  *   into the object the caller read (`Collection.configure`, which carries
- *   every other member forward and rebases on a lost race; under WAS v0.5 the
+ *   every other member forward and rebases on a lost race; under PWS v0.5 the
  *   `PUT` at `meta` is a full replacement, so a partial body would clear the
  *   members the caller never read): the `{ scheme: 'edv' }` encryption
  *   descriptor on a private
@@ -29,8 +29,8 @@
  *   PUBLIC collection is never marked because public implies plaintext), and
  *   the `plaintext.indexes` list on a public one;
  * - the blinded-index schema write for private ones
- *   ({@link WasRemoteStore.declareBlindedIndexes}) -- plus the equality query
- *   verb itself ({@link WasRemoteStore.queryCollectionByEquality}), which
+ *   ({@link PwsRemoteStore.declareBlindedIndexes}) -- plus the equality query
+ *   verb itself ({@link PwsRemoteStore.queryCollectionByEquality}), which
  *   routes on the collection's visibility: the canonical sorted
  *   `filter[attr]=value` GET for a public collection, the client-blinded
  *   `blinded-index` query for a private one, both parsed into the same
@@ -45,22 +45,22 @@ import type {
 import {
   NotFoundError,
   NotImplementedError,
-  WasClient,
+  PwsClient,
   mapError
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import type {
   Collection,
   CollectionEncryption,
   CollectionMetadata,
   CollectionWritableFields
-} from '@interop/was-client'
-import { createEdvEncryption } from '@interop/was-client/edv'
-import type { EncryptionDescriptorSource } from '@interop/was-client/edv'
-import { resourceLogStore } from '@interop/was-client/log'
-import { collectionUrl, resourceUrl } from '@interop/was-client/paths'
-import { errorStatus, errorMessage } from '@interop/was-client/sync'
+} from '@interop/pws-client'
+import { createEdvEncryption } from '@interop/pws-client/edv'
+import type { EncryptionDescriptorSource } from '@interop/pws-client/edv'
+import { resourceLogStore } from '@interop/pws-client/log'
+import { collectionUrl, resourceUrl } from '@interop/pws-client/paths'
+import { errorStatus, errorMessage } from '@interop/pws-client/sync'
 import { logGovernedDescriptorSource } from '@interop/wallet-core/descriptors'
-import type { WasCollectionConfig } from '../config.js'
+import type { PwsCollectionConfig } from '../config.js'
 import type { ParsedGrants } from '../grants.js'
 import { createSpaceTrust, type SpaceTrust } from './spaceTrust.js'
 
@@ -84,7 +84,7 @@ export interface DeclarationResult {
   /**
    * Whether the declaration actually landed a write on the collection's
    * Metadata object, as opposed to finding the goal state already in place.
-   * Reported by {@link WasRemoteStore.declareBlindedIndexes}, so a caller
+   * Reported by {@link PwsRemoteStore.declareBlindedIndexes}, so a caller
    * holding a copy of the object read before the declaration knows whether
    * that copy is still current.
    */
@@ -93,7 +93,7 @@ export interface DeclarationResult {
 
 /**
  * One collection's Metadata object as `readCollectionMeta` returns it:
- * was-client's own `describeWithEtag` shape.
+ * pws-client's own `describeWithEtag` shape.
  */
 export type CollectionMetaRead = NonNullable<
   Awaited<ReturnType<Collection['describeWithEtag']>>
@@ -210,7 +210,7 @@ function sameIndexDeclaration(
  * descriptor, the public `indexes` list, and the blinded-index schema --
  * so a refused or raced write is reported rather than thrown, uniformly.
  *
- * @param collectionId {string}   the WAS collection id
+ * @param collectionId {string}   the PWS collection id
  * @param err {unknown}   the caught error
  * @returns {DeclarationResult}
  */
@@ -228,14 +228,14 @@ function declarationFailure(
   }
 }
 
-export class WasRemoteStore {
-  public readonly was: WasClient
+export class PwsRemoteStore {
+  public readonly pws: PwsClient
   /**
    * The Space every grant is rooted in, in canonical form.
    */
   public readonly spaceUrl: string
   readonly #byCollectionId: Record<string, IZcap>
-  // Per WAS collection id: the effective visibility + declared equality
+  // Per PWS collection id: the effective visibility + declared equality
   // indexes (the registry guarantees one declaration per id).
   readonly #configById: Map<string, CollectionRouting>
   // Whether `fromGrants` was given this app's identity keys, i.e. whether the
@@ -247,19 +247,19 @@ export class WasRemoteStore {
   readonly #trust: SpaceTrust
 
   private constructor({
-    was,
+    pws,
     parsed,
     configById,
     hasIdentityKeys,
     trust
   }: {
-    was: WasClient
+    pws: PwsClient
     parsed: ParsedGrants
     configById: Map<string, CollectionRouting>
     hasIdentityKeys: boolean
     trust: SpaceTrust
   }) {
-    this.was = was
+    this.pws = pws
     this.spaceUrl = parsed.spaceUrl
     this.#byCollectionId = parsed.byCollectionId
     this.#configById = configById
@@ -272,7 +272,7 @@ export class WasRemoteStore {
    * ZcapClient (whose invocation signer is the controller the grants target).
    *
    * Replication itself needs no keystore at all: it moves opaque envelopes
-   * verbatim through `was.request()`, which bypasses the codec, and
+   * verbatim through `pws.request()`, which bypasses the codec, and
    * encrypt/decrypt is a local read/write concern. The keystore matters only
    * for the codec-driven verbs -- the blinded-index query and schema
    * declaration -- so it answers with the app's identity keys when they are
@@ -284,7 +284,7 @@ export class WasRemoteStore {
    * @param options {object}
    * @param options.parsed {ParsedGrants}
    * @param options.zcapClient {ZcapClient}
-   * @param [options.collections] {WasCollectionConfig[]}   the collection
+   * @param [options.collections] {PwsCollectionConfig[]}   the collection
    *   registry; entries with `visibility: 'public'` are never marked encrypted
    * @param [options.keys] {object}   this app's identity key-agreement key and
    *   its resolver (the same pair `IdentityAgents` carries)
@@ -296,7 +296,7 @@ export class WasRemoteStore {
    *   grants passes one shared value, so the owner is resolved once and a head
    *   served to the second store is checked against what the first pinned;
    *   the default is a fresh one for this store alone
-   * @returns {WasRemoteStore}
+   * @returns {PwsRemoteStore}
    */
   static fromGrants({
     parsed,
@@ -307,16 +307,16 @@ export class WasRemoteStore {
   }: {
     parsed: ParsedGrants
     zcapClient: ZcapClient
-    collections?: WasCollectionConfig[]
+    collections?: PwsCollectionConfig[]
     keys?: {
       keyAgreementKey: IKeyAgreementKey
       keyResolver: IKeyResolver
     }
     trust?: SpaceTrust
-  }): WasRemoteStore {
+  }): PwsRemoteStore {
     // A grants-only app holds a Space URL and nothing above it: `forSpace`
     // opens the client on that URL alone, with no base server URL to assume.
-    const was = WasClient.forSpace({
+    const pws = PwsClient.forSpace({
       spaceUrl: parsed.spaceUrl,
       zcapClient,
       encryption: createEdvEncryption({
@@ -332,8 +332,8 @@ export class WasRemoteStore {
         }
       ])
     )
-    return new WasRemoteStore({
-      was,
+    return new PwsRemoteStore({
+      pws,
       parsed,
       configById,
       hasIdentityKeys: keys !== undefined,
@@ -342,11 +342,11 @@ export class WasRemoteStore {
   }
 
   /**
-   * The delegated capability for one WAS collection, or `undefined` when no
+   * The delegated capability for one PWS collection, or `undefined` when no
    * grant covers it (the sync port then invokes without a capability and the
    * server denies it -- the intended fail-closed mode).
    *
-   * @param collectionId {string}   the WAS collection id
+   * @param collectionId {string}   the PWS collection id
    * @returns {IZcap | undefined}
    */
   collectionCapability(collectionId: string): IZcap | undefined {
@@ -358,18 +358,18 @@ export class WasRemoteStore {
    * capability: every codec-driven or description-level verb here goes
    * through it, so the routing is written once.
    *
-   * @param collectionId {string}   the WAS collection id
+   * @param collectionId {string}   the PWS collection id
    * @param capability {IZcap}   the delegated zcap covering it
    * @returns {Collection}
    */
   #collection(collectionId: string, capability: IZcap): Collection {
-    return this.was
+    return this.pws
       .spaceAt(this.spaceUrl)
       .collection(collectionId, { capability })
   }
 
   /**
-   * The verifying `EncryptionDescriptorSource` (`@interop/was-client/edv`)
+   * The verifying `EncryptionDescriptorSource` (`@interop/pws-client/edv`)
    * every `edv` collection this store reaches is read through: wallet-core's
    * `logGovernedDescriptorSource` over each collection's `meta/log`, invoked
    * with THAT collection's delegated zcap (the same grant that reads the
@@ -378,7 +378,7 @@ export class WasRemoteStore {
    * verified did:webvh account log ({@link SpaceTrust.owner}, resolved once
    * per trust state rather than per store).
    *
-   * It declares `verifiesHistory: true`, which is what was-client's
+   * It declares `verifiesHistory: true`, which is what pws-client's
    * `requireGoverned` admits a source on. A plain Metadata read would let a
    * host strip the governing history from the served projection and serve an
    * epoch it minted; this source never reads the projection at all.
@@ -417,7 +417,7 @@ export class WasRemoteStore {
    * collection's Metadata object ({@link declareCollectionIndexes}), kept
    * apart from its caller so the merge rules read in one place. With no readable object
    * there is nothing to merge into, and writing a bare change would replace
-   * the whole object under WAS v0.5's full-replacement `PUT`: the write is
+   * the whole object under PWS v0.5's full-replacement `PUT`: the write is
    * refused and reported NOT ok rather than attempted.
    *
    * `change` is called only once `current` is known to be present, and may
@@ -430,7 +430,7 @@ export class WasRemoteStore {
    * `backend`, the `custom` envelope -- forward and rebases on a lost race,
    * pinned to the read's validator).
    *
-   * @param collectionId {string}   the WAS collection id
+   * @param collectionId {string}   the PWS collection id
    * @param options {object}
    * @param options.current {CollectionMetaRead | undefined}   the collection's
    *   Metadata object as the caller read it, the merge baseline
@@ -496,14 +496,14 @@ export class WasRemoteStore {
    *
    * Answers `undefined` for exactly the outcomes that mean "no object": no
    * capability covers the collection, the read answered not-found (which is
-   * also how WAS answers an unauthorized read), or the backend has no metadata
+   * also how PWS answers an unauthorized read), or the backend has no metadata
    * support (`501`). Any other failure (a dropped connection, a 5xx) is
    * thrown, wrapped with the collection id. It must NOT read as "no object":
    * a caller that takes it for one opens the collection under the fail-closed
    * placeholder cipher, skips the blinded-index install over a guess, or
    * writes a declaration over a roster it never saw.
    *
-   * @param collectionId {string}   the WAS collection id
+   * @param collectionId {string}   the PWS collection id
    * @returns {Promise<CollectionMetaRead | undefined>}
    */
   async readCollectionMeta(
@@ -545,14 +545,14 @@ export class WasRemoteStore {
    * replaced, and every other member -- `name`, `backend`, the `custom`
    * envelope, anything this client does not model -- is carried forward,
    * pinned to the read's validator. A lost race is re-read and rebased by
-   * was-client's compare-and-swap; only a race lost repeatedly is reported
+   * pws-client's compare-and-swap; only a race lost repeatedly is reported
    * here, and the next session's pass repairs it. With no readable object
    * there is nothing to merge into, and writing the list alone would replace
    * the whole object with it: the write is refused and reported NOT ok (see
    * the shared merge tail below). The already-matches check runs after
    * that guard, against the object it confirms is there.
    *
-   * @param collectionId {string}   the WAS collection id
+   * @param collectionId {string}   the PWS collection id
    * @param options {object}
    * @param [options.current] {CollectionMetaRead}   the collection's Metadata
    *   object as the caller read it; absent when it could not be read
@@ -606,7 +606,7 @@ export class WasRemoteStore {
    * declared carries no blinded entry for it and is not findable until it is
    * rewritten.
    *
-   * @param collectionId {string}   the WAS collection id
+   * @param collectionId {string}   the PWS collection id
    * @param options {object}
    * @param options.encryption {CollectionEncryption | undefined}   the
    *   already-read descriptor the caller fetched from the collection
@@ -699,7 +699,7 @@ export class WasRemoteStore {
    * findable once it is rewritten.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.equals {Record<string, string>}   equality terms; multiple
    *   attributes AND together
    * @param [options.limit] {number}   page size (server default when omitted)
@@ -770,8 +770,8 @@ export class WasRemoteStore {
       params.push(`cursor=${encodeURIComponent(cursor)}`)
     }
     // The list endpoint is the collection container URL itself (canonical
-    // trailing slash), the same URL was-client's own listing walks.
-    const response = await this.was.request({
+    // trailing slash), the same URL pws-client's own listing walks.
+    const response = await this.pws.request({
       capability,
       url:
         `${collectionUrl({ spaceUrl: this.spaceUrl, collectionId })}?` +
@@ -795,7 +795,7 @@ export class WasRemoteStore {
   /**
    * The world-readable share URL for one document in a public (plaintext)
    * collection: the exact URL an unauthenticated reader fetches (e.g. via
-   * `WasClient.publicRead`) to consume a share link. Because a public
+   * `PwsClient.publicRead`) to consume a share link. Because a public
    * collection stores the payload under its own logical `id`, this URL is
    * stable across edits of the document. Fails closed before composing
    * anything on a non-public collection (the encrypted path stores under a
@@ -806,7 +806,7 @@ export class WasRemoteStore {
    * after the next sync push.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.id {string}   the document's logical uuid
    * @returns {string}
    */
