@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * Dev grant provisioning (CHAPI bypassed). Against a running was-teaching-server
+ * Dev grant provisioning (CHAPI bypassed). Against a running web-spaces-server
  * this produces what a wallet's account genesis produces, in the same stage
  * order, and then delegates the app's grants:
  *
@@ -143,7 +143,7 @@ export interface ProvisionDevGrantsResult {
  *
  * @param options {object}
  * @param options.baseServerUrl {string}   the base server URL of a running
- *   was-teaching-server (`http://localhost:3002/`), under which it lays out
+ *   web-spaces-server (`http://localhost:3002/`), under which it lays out
  *   `service`, `spaces/` and `space/{id}/`
  * @param options.seed {Uint8Array}   the app (requester) master seed; the
  *   app DID the grants are delegated to is derived from it

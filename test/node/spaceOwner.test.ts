@@ -19,7 +19,10 @@ import {
   it,
   vi
 } from 'vitest'
-import { openTempBackend, startTestServer } from 'was-teaching-server/testing'
+import {
+  openTempBackend,
+  startTestServer
+} from '@interop/web-spaces-server/testing'
 import { logToJsonlString } from '@interop/did-method-webvh'
 import { provisionDevGrants } from '../../src/dev/provisionDevGrants.js'
 import { resolveSpaceOwner } from '../../src/identity/spaceOwner.js'
@@ -37,7 +40,7 @@ beforeAll(async () => {
     })
   })
   provisioned = await provisionDevGrants({
-    baseServerUrl: server.serverUrl,
+    baseServerUrl: server.baseServerUrl,
     seed: SEED,
     collections: ['notes']
   })
@@ -71,7 +74,7 @@ describe('resolveSpaceOwner', () => {
     )
     await expect(
       resolveSpaceOwner({
-        spaceUrl: `${server!.serverUrl}/space/another-space/`
+        spaceUrl: `${server!.baseServerUrl}space/another-space/`
       })
     ).rejects.toThrow(/not where it was served from/)
   })
@@ -79,7 +82,7 @@ describe('resolveSpaceOwner', () => {
   it('refuses a Space that publishes no account log', async () => {
     await expect(
       resolveSpaceOwner({
-        spaceUrl: `${server!.serverUrl}/space/no-such-space/`
+        spaceUrl: `${server!.baseServerUrl}space/no-such-space/`
       })
     ).rejects.toThrow(/publishes no readable account log/)
   })

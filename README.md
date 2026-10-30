@@ -665,7 +665,7 @@ driver's diagnostics arrive under the same namespace.
 ## Dev tooling
 
 The `./dev` entry provisions a Space, collections, and delegated read/write
-grants against a running was-teaching-server, so an app can dev-sync without a
+grants against a running web-spaces-server, so an app can dev-sync without a
 CHAPI wallet in the loop. It is Node-only (uses `node:fs`).
 
 ```ts

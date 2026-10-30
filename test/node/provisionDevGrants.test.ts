@@ -10,7 +10,10 @@
  * @vitest-environment node
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { openTempBackend, startTestServer } from 'was-teaching-server/testing'
+import {
+  openTempBackend,
+  startTestServer
+} from '@interop/web-spaces-server/testing'
 import { CapabilityAgent } from '@interop/capability-agent'
 import { WasClient } from '@interop/was-client'
 import { webvhZcapClient } from '@interop/wallet-core/webvh'
@@ -54,7 +57,7 @@ async function describeAsOwner({
     keyName: 'provisioner-key'
   })
   const owner = new WasClient({
-    baseServerUrl: server!.serverUrl,
+    baseServerUrl: server!.baseServerUrl,
     zcapClient: webvhZcapClient({ keyAgent, did })
   })
   return await owner.space(spaceId).describe()
@@ -63,7 +66,7 @@ async function describeAsOwner({
 describe('provisionDevGrants', () => {
   it('promotes the Space to the did:webvh under the default name', async () => {
     const provisioned = await provisionDevGrants({
-      baseServerUrl: server!.serverUrl,
+      baseServerUrl: server!.baseServerUrl,
       seed: SEED,
       collections: ['notes']
     })
@@ -77,7 +80,7 @@ describe('provisionDevGrants', () => {
 
   it('keeps a configured Space name through the promotion', async () => {
     const provisioned = await provisionDevGrants({
-      baseServerUrl: server!.serverUrl,
+      baseServerUrl: server!.baseServerUrl,
       seed: SEED,
       collections: ['notes'],
       spaceName: 'Named Otherwise'
@@ -93,7 +96,7 @@ describe('provisionDevGrants', () => {
   it("mints grants that live DEV_GRANT_TTL_MS, not ezcap's five minutes", async () => {
     const before = Date.now()
     const provisioned = await provisionDevGrants({
-      baseServerUrl: server!.serverUrl,
+      baseServerUrl: server!.baseServerUrl,
       seed: SEED,
       collections: ['notes']
     })
@@ -106,7 +109,7 @@ describe('provisionDevGrants', () => {
   it('honors a caller-supplied expiry', async () => {
     const expires = new Date(Date.now() + 60 * 60 * 1000)
     const provisioned = await provisionDevGrants({
-      baseServerUrl: server!.serverUrl,
+      baseServerUrl: server!.baseServerUrl,
       seed: SEED,
       collections: ['notes'],
       expires

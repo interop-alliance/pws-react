@@ -3,7 +3,7 @@
  */
 /**
  * End-to-end plaintext-collection sync against a real in-process
- * was-teaching-server (the published npm package): provisions a dev Space with
+ * web-spaces-server (the published npm package): provisions a dev Space with
  * a public (plaintext) collection and a private (encrypted) one, replicates
  * local writes up through the real sync stack, asserts the server-side bodies
  * (the public payload verbatim; an EDV envelope for the private one), and
@@ -13,7 +13,10 @@
  */
 import 'fake-indexeddb/auto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { openTempBackend, startTestServer } from 'was-teaching-server/testing'
+import {
+  openTempBackend,
+  startTestServer
+} from '@interop/web-spaces-server/testing'
 import { provisionDevGrants } from '../../src/dev/provisionDevGrants.js'
 import { parseGrants, type ParsedGrants } from '../../src/grants.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
@@ -88,7 +91,7 @@ async function waitFor<T>(
 }
 
 let server: Awaited<ReturnType<typeof startTestServer>> | undefined
-let serverUrl: string
+let baseServerUrl: string
 let parsed: ParsedGrants
 let zcapClient: ZcapClient
 const controllers: SyncController[] = []
@@ -103,17 +106,17 @@ const note = makeDoc('secret-note-marker')
 beforeAll(async () => {
   // The server owns the temp backend, so closing it removes the data dir.
   // Zcap invocation targets embed the port, so every client is built from the
-  // `serverUrl` the boot returns.
+  // `baseServerUrl` the boot returns.
   server = await startTestServer({
     backend: await openTempBackend({
       prefix: 'was-react-plaintext-',
       capacityBytes: Infinity
     })
   })
-  ;({ serverUrl } = server)
+  ;({ baseServerUrl } = server)
 
   const provisioned = await provisionDevGrants({
-    baseServerUrl: serverUrl,
+    baseServerUrl,
     seed: SEED,
     collections: [{ id: PUBLIC_ID, visibility: 'public' }, PRIVATE_ID]
   })
@@ -163,7 +166,7 @@ async function openSyncedReplica(dbName: string): Promise<LocalStore> {
   return store
 }
 
-describe('plaintext-collection sync against was-teaching-server', () => {
+describe('plaintext-collection sync against web-spaces-server', () => {
   it('pushes the public payload verbatim and the private one encrypted', async () => {
     const store = await openSyncedReplica('plaintext-sync-a')
     await store.insertEntity('posts', post)
@@ -344,7 +347,7 @@ describe('plaintext-collection sync against was-teaching-server', () => {
     expect(url).toBe(
       remoteStore.publicUrlFor({ collectionId: PUBLIC_ID, id: shared.id })
     )
-    expect(remoteStore.spaceUrl.startsWith(`${serverUrl}/space/`)).toBe(true)
+    expect(remoteStore.spaceUrl.startsWith(`${baseServerUrl}space/`)).toBe(true)
     expect(url).toBe(`${remoteStore.spaceUrl}${PUBLIC_ID}/${shared.id}`)
 
     // An unauthenticated reader (a plain, unsigned GET) can consume the share

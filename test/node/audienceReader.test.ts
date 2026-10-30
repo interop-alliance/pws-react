@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * `AudienceReader` against a real in-process was-teaching-server: an owner
+ * `AudienceReader` against a real in-process web-spaces-server: an owner
  * provisions a plaintext audience collection in its own Space, delegates a
  * GET and HEAD zcap on it to a subscriber, and the subscriber's reader follows
  * the collection's `changes` feed through the GET form, falls back to the
@@ -22,7 +22,10 @@ import {
   it,
   vi
 } from 'vitest'
-import { openTempBackend, startTestServer } from 'was-teaching-server/testing'
+import {
+  openTempBackend,
+  startTestServer
+} from '@interop/web-spaces-server/testing'
 import {
   WasClient,
   type ActionInput,
@@ -79,7 +82,7 @@ beforeAll(async () => {
       })
     })
   ])
-  appServerUrl = appServer.serverUrl
+  appServerUrl = appServer.baseServerUrl
   const ownerAgent = await CapabilityAgent.fromSeed({
     seed: OWNER_SEED,
     handle: 'audience-owner',
@@ -87,7 +90,7 @@ beforeAll(async () => {
   })
   ownerDid = ownerAgent.id
   owner = WasClient.fromSigner({
-    baseServerUrl: audienceServer.serverUrl,
+    baseServerUrl: audienceServer.baseServerUrl,
     signer: ownerAgent.getSigner()
   })
   const space = await owner.createSpace({

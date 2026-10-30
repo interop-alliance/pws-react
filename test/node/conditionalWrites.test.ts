@@ -3,7 +3,7 @@
  */
 /**
  * Conditional-write (`If-Match` / `If-None-Match`) coverage for the push side of
- * the sync adapter, driven against a REAL in-process was-teaching-server and a
+ * the sync adapter, driven against a REAL in-process web-spaces-server and a
  * REAL encrypted collection: a dev Space is provisioned with a private
  * (EDV-encrypted) collection, every pushed body is a genuine EDV envelope sealed
  * under the collection's key epoch, and the sync port is the one the sync
@@ -28,7 +28,10 @@
  * @vitest-environment node
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { openTempBackend, startTestServer } from 'was-teaching-server/testing'
+import {
+  openTempBackend,
+  startTestServer
+} from '@interop/web-spaces-server/testing'
 import type { WithDeleted } from 'rxdb/plugins/core'
 import { provisionDevGrants } from '../../src/dev/provisionDevGrants.js'
 import { parseGrants } from '../../src/grants.js'
@@ -88,17 +91,17 @@ let port: WasSyncPort
 beforeAll(async () => {
   // The server owns the temp backend, so closing it removes the data dir.
   // Zcap invocation targets embed the port, so every client is built from the
-  // `serverUrl` the boot returns.
+  // `baseServerUrl` the boot returns.
   server = await startTestServer({
     backend: await openTempBackend({
       prefix: 'was-react-conditional-',
       capacityBytes: Infinity
     })
   })
-  const { serverUrl } = server
+  const { baseServerUrl } = server
 
   const provisioned = await provisionDevGrants({
-    baseServerUrl: serverUrl,
+    baseServerUrl,
     seed: SEED,
     collections: [{ id: PRIVATE_ID, visibility: 'private' }]
   })

@@ -3,7 +3,7 @@
  */
 /**
  * Node-only dev tooling, exposed through the package `./dev` subpath. Provisions
- * dev grants against a running was-teaching-server so an app can dev-sync
+ * dev grants against a running web-spaces-server so an app can dev-sync
  * without a CHAPI wallet in the loop.
  */
 export {

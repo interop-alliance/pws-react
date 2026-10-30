@@ -57,11 +57,7 @@ import type {
 import { createEdvEncryption } from '@interop/was-client/edv'
 import type { EncryptionDescriptorSource } from '@interop/was-client/edv'
 import { resourceLogStore } from '@interop/was-client/log'
-import {
-  collectionUrl,
-  resourceUrl,
-  spaceIdOfUrl
-} from '@interop/was-client/paths'
+import { collectionUrl, resourceUrl } from '@interop/was-client/paths'
 import { errorStatus, errorMessage } from '@interop/was-client/sync'
 import { logGovernedDescriptorSource } from '@interop/wallet-core/descriptors'
 import type { WasCollectionConfig } from '../config.js'
@@ -409,8 +405,9 @@ export class WasRemoteStore {
       },
       resolveController: () => this.#trust.owner(),
       pinStore: this.#trust.pinStore,
-      // wallet-core keys its pin slots by Space id.
-      spaceId: spaceIdOfUrl(this.spaceUrl)
+      // wallet-core keys each collection's pin slot by its log's URL, so the
+      // Space URL goes through as received: a single fixed Space has no id.
+      spaceUrl: this.spaceUrl
     })
     return this.#descriptorSource
   }

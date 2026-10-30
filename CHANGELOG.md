@@ -1,5 +1,12 @@
 # @interop/was-react Changelog
 
+## 0.33.0 - TBD
+
+### Changed
+
+- The in-process test server dependency is now `@interop/web-spaces-server`
+  0.45.0 (renamed from `was-teaching-server`).
+
 ## 0.32.0 - 2026-10-29
 
 ### Changed

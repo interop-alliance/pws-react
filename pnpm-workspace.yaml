@@ -7,5 +7,4 @@ allowedDeprecatedVersions:
   crypto-js: '4.2.0'
 minimumReleaseAgeExclude:
   - '@interop/*'
-  - 'was-teaching-server*'
   - 'byoe-context*'

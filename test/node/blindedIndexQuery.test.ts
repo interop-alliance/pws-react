@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * End-to-end blinded-index query against a real in-process was-teaching-server
+ * End-to-end blinded-index query against a real in-process web-spaces-server
  * (the published npm package): provisions a dev Space with a PRIVATE
  * (encrypted) collection carrying a blinded-index key, lets the sync bootstrap
  * declare the registry's index attributes into the collection's encrypted
@@ -14,7 +14,10 @@
  */
 import 'fake-indexeddb/auto'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { openTempBackend, startTestServer } from 'was-teaching-server/testing'
+import {
+  openTempBackend,
+  startTestServer
+} from '@interop/web-spaces-server/testing'
 import { provisionDevGrants } from '../../src/dev/provisionDevGrants.js'
 import { parseGrants, type ParsedGrants } from '../../src/grants.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
@@ -105,18 +108,18 @@ function collectionHandle() {
 beforeAll(async () => {
   // The server owns the temp backend, so closing it removes the data dir.
   // Zcap invocation targets embed the port, so every client is built from the
-  // `serverUrl` the boot returns.
+  // `baseServerUrl` the boot returns.
   server = await startTestServer({
     backend: await openTempBackend({
       prefix: 'was-react-blinded-',
       capacityBytes: Infinity
     })
   })
-  const { serverUrl } = server
+  const { baseServerUrl } = server
 
   // The blinding key installs with the collection's first key epoch or never.
   const provisioned = await provisionDevGrants({
-    baseServerUrl: serverUrl,
+    baseServerUrl,
     seed: SEED,
     collections: [
       { id: PRIVATE_ID, visibility: 'private', blindedIndex: true },
@@ -160,7 +163,7 @@ afterAll(async () => {
   await server?.fastify.close()
 }, 60000)
 
-describe('blinded-index query against was-teaching-server', () => {
+describe('blinded-index query against web-spaces-server', () => {
   it('declares the registry attributes into the encrypted schema', async () => {
     // The schema is collection state, readable by any recipient. The attribute
     // is rooted at the EDV document's `content`, which for a JSON payload IS

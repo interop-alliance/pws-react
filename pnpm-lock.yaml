@@ -36,20 +36,20 @@ importers:
         specifier: ^4.1.0
         version: 4.1.0
       '@interop/vh-resource-log':
-        specifier: ^0.9.0
-        version: 0.9.0
+        specifier: ^0.11.0
+        version: 0.11.0(@interop/storage-core@0.43.0)
       '@interop/wallet-core':
-        specifier: ^0.109.0
-        version: 0.109.0(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.101.0(@interop/jsonld-signatures@11.9.0))
+        specifier: ^0.111.0
+        version: 0.111.0(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.103.0(@interop/jsonld-signatures@11.9.0))
       '@interop/wallet-request':
-        specifier: ^0.5.2
-        version: 0.5.2
+        specifier: ^0.6.0
+        version: 0.6.0
       '@interop/was-client':
-        specifier: ^0.101.0
-        version: 0.101.0(@interop/jsonld-signatures@11.9.0)
+        specifier: ^0.103.0
+        version: 0.103.0(@interop/jsonld-signatures@11.9.0)
       '@interop/was-sync':
         specifier: ^0.11.0
-        version: 0.11.0(@interop/was-client@0.101.0(@interop/jsonld-signatures@11.9.0))(rxdb@17.6.0(react@19.3.1)(rxjs@7.8.2)(typescript@6.0.3))
+        version: 0.11.0(@interop/was-client@0.103.0(@interop/jsonld-signatures@11.9.0))(rxdb@17.6.0(react@19.3.1)(rxjs@7.8.2)(typescript@6.0.3))
       '@scure/base':
         specifier: ^2.2.0
         version: 2.4.0
@@ -78,6 +78,9 @@ importers:
       '@interop/logger':
         specifier: ^0.2.0
         version: 0.2.0
+      '@interop/web-spaces-server':
+        specifier: ^0.45.0
+        version: 0.45.0
       '@mui/icons-material':
         specifier: ^9.0.0
         version: 9.5.0(@mui/material@9.5.0(@emotion/react@11.14.0(@types/react@19.3.0)(react@19.3.1))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.3.0)(react@19.3.1))(@types/react@19.3.0)(react@19.3.1))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(@types/react@19.3.0)(react@19.3.1)
@@ -156,9 +159,6 @@ importers:
       vitest:
         specifier: ^4.1.7
         version: 4.1.12(@types/node@26.6.6)(@vitest/coverage-v8@4.1.12)(jsdom@27.4.0(@noble/hashes@2.4.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
-      was-teaching-server:
-        specifier: ^0.42.3
-        version: 0.42.3
       zustand:
         specifier: ^5.0.12
         version: 5.0.16(@types/react@19.3.0)(react@19.3.1)
@@ -794,20 +794,16 @@ packages:
     resolution: {integrity: sha512-WxnkYKmg4y0eSMlXVUPlzHkZlWSRVlyjTBRQkrEtcmPY5A7gw/K/ANB9S8YPtOVWreV+RAATEvjF56CJGDU3Yg==}
     engines: {node: '>=24.0'}
 
-  '@interop/space-archive@0.8.3':
-    resolution: {integrity: sha512-eaojZvCiLdml+3m97mrud8aZFk+4fztiWXyXA3tFjpOHu7X2ILXBAcFpUhl3uc7E26rqu+cLQmRaay7gFRpfDQ==}
+  '@interop/space-archive@0.11.1':
+    resolution: {integrity: sha512-IXcs24zEgqaOeG7AtvrEBMo/o1bv8JbkaU1PSO6Gp0Br2/MtZ83qW+twuOM+ia8G1iTDmgHrUnhJzTnoM9ZLiw==}
     engines: {node: '>=24.0'}
-
-  '@interop/storage-core@0.36.0':
-    resolution: {integrity: sha512-yoBABfWtLwcUK8caPXKlPPNjq6AX4/SUJ/JRwa0ps8ihuxVfqwz6sMKbsvMDmVrLLjSOApY0innoTIDrtRGjrg==}
-    engines: {node: '>=22.0'}
 
   '@interop/storage-core@0.38.0':
     resolution: {integrity: sha512-wavRRv4uzKz9m21sdfZtOGeBy8TSgYWRgHTfq+SE7Dak/E2u77xmn4x7EaV4q3sPgmjFhSbz+YlzG6WpQor3mA==}
     engines: {node: '>=22.0'}
 
-  '@interop/storage-core@0.42.0':
-    resolution: {integrity: sha512-9ERs9uKOQn6FtBzuDmBkZeCVUZS4+g7W5ZICd9/uoFddjcngOWdGdx10LUaS7bdSb1Q3pDH9/HYhnVi0TrP8Zg==}
+  '@interop/storage-core@0.43.0':
+    resolution: {integrity: sha512-pa9aoh1WgeKqodIvi74iYR1mQm6v3rpQYbyzvQs73XPE4p01EN7Sh8wkOGZ7hyZTdwPRHd5oDeS2G2qwnUCRMA==}
     engines: {node: '>=22.0'}
 
   '@interop/vc-bitstring-status-list@3.4.1':
@@ -822,22 +818,32 @@ packages:
     resolution: {integrity: sha512-YCKExa8k0gNuf/JRJWijLQTCQA7q4dQRWFzWGuCYygkbVT7+hU7dX2euVO3RuL3TIa0zVLGDQTANFCReWocvkg==}
     engines: {node: '>=24.0'}
 
+  '@interop/vh-resource-log@0.10.1':
+    resolution: {integrity: sha512-6WGeYO3jdFHsfrFLmqZhcpdXVlXnxY2DNUDMmAKDU3esw3dNUC4SjwrDtUPLdaODu3ww7GCfBdrHBKExRVRViA==}
+    engines: {node: '>=24.0'}
+
+  '@interop/vh-resource-log@0.11.0':
+    resolution: {integrity: sha512-ZJuTdIMcR6v6gZttf1pjCE8VjfgZaO1jVjGgsEBn2qvDzc6OfIkHrz5XnoKfJCGjUN+Az84S7ppWHv0qj5BbBw==}
+    engines: {node: '>=24.0'}
+    peerDependencies:
+      '@interop/storage-core': '>=0.44.0'
+
   '@interop/vh-resource-log@0.9.0':
     resolution: {integrity: sha512-9QP1XExxu95IuHlB3b9V3QKAKF4tLbp+agF4YByVlywgWcSrUCRD9YxYctacummgPIQTTV+iKBMZJIu72i8OnQ==}
     engines: {node: '>=24.0'}
 
-  '@interop/wallet-core@0.109.0':
-    resolution: {integrity: sha512-m52bnvOD8V1RyRD/x4OuycxcrhpdmqxLfVh60C1ZVbrkWWoGLeJ298dzqTXCyCbdXlO9jcVU8KRQgk70n0GvRg==}
+  '@interop/wallet-core@0.111.0':
+    resolution: {integrity: sha512-5TEt4ZxUI/2Vj40gyYcLiCu8vjSz3kd6Al5KVZMUR6f26TL7sh8LWs1EdDHl53OVfCcxUBjrP5c9ry2xsudAKw==}
     engines: {node: '>=24.0'}
     peerDependencies:
       '@interop/was-client': '>=0.100.1 <1.0.0'
 
-  '@interop/wallet-request@0.5.2':
-    resolution: {integrity: sha512-VVu173mujCKN8Rz7aHlgUhc4aK4bP/UcIiCYdrhwkuJWVI7ZOLABn1esmJjtOpuqCLx3tD85WJCtsbqy0NY0rg==}
+  '@interop/wallet-request@0.6.0':
+    resolution: {integrity: sha512-4IJm7t3eGjjI3T86/jrIFLBFRhjn+7yZXTWaAdg9rrGZUvt0DZ2w/rQWo1Dj6tZkMNZmTHAz5ZkxdYU3auh7tw==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-client@0.101.0':
-    resolution: {integrity: sha512-aRnWQJ1V5eqump+39w9ZaLna5GFDELNqKmT3+V0umfpxq5ffkcBageCS7AGVZSQTny/uAfzTTKbYtctEOJ2eMA==}
+  '@interop/was-client@0.103.0':
+    resolution: {integrity: sha512-10DhW83Bm9vxM+S6RmYZdLmxC1qGR+eMMEZ8is5DJEOui0DJLWDp53MpswTQ3miMIjt3YayJxc66jaRJGdwWPA==}
     engines: {node: '>=24.0'}
 
   '@interop/was-sync@0.11.0':
@@ -849,6 +855,10 @@ packages:
     peerDependenciesMeta:
       rxdb:
         optional: true
+
+  '@interop/web-spaces-server@0.45.0':
+    resolution: {integrity: sha512-GWlE01Ue/zkeMPHVvWqBouyjhu/HYZiFkpQnysWdIphCVd5LQ4j9ytG3cSxi5aSrz/7aGDlGw6iuuhlf3FZyNg==}
+    engines: {node: '>=24.0'}
 
   '@interop/x25519-key-agreement-key@5.4.3':
     resolution: {integrity: sha512-B9/nkteXhceT1Psy+0Lwg4R4JzW6TUYDe8AgPIc3nsQKOCdIQ4MjjUPy9/kQ7eTnzW+GR0FcTSKDy6/GQqlwdQ==}
@@ -2927,10 +2937,6 @@ packages:
     resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}
     engines: {node: '>=18'}
 
-  was-teaching-server@0.42.3:
-    resolution: {integrity: sha512-N4ibBm/yoxbhe8D5a6N/Mk+chWCeigDaGFoKI7n7japiM5vZiluEkdbv6R6jF/tMKOTVBV8/tcCYWXIihMU1Xw==}
-    engines: {node: '>=24.0'}
-
   web-request-rpc@3.0.1:
     resolution: {integrity: sha512-dnVaNe3b89vnICKz440TCdxhDvww+pbL0iupUldiVrCXcb15eaXF8lcAwySw8u9vHNpeqEWfswAZv+LO24/Vsw==}
 
@@ -3684,7 +3690,7 @@ snapshots:
 
   '@interop/lru-memoize@4.0.3':
     dependencies:
-      lru-cache: 11.5.2
+      lru-cache: 11.5.3
 
   '@interop/minimal-cipher@7.11.1':
     dependencies:
@@ -3725,9 +3731,9 @@ snapshots:
 
   '@interop/social-core@0.8.1': {}
 
-  '@interop/space-archive@0.8.3':
+  '@interop/space-archive@0.11.1':
     dependencies:
-      '@interop/storage-core': 0.36.0
+      '@interop/storage-core': 0.43.0
       events: 3.3.0
       mime-types: 3.0.2
       tar-stream: 3.2.2
@@ -3737,15 +3743,11 @@ snapshots:
       - bare-buffer
       - react-native-b4a
 
-  '@interop/storage-core@0.36.0':
-    dependencies:
-      '@interop/data-integrity-core': 8.9.0
-
   '@interop/storage-core@0.38.0':
     dependencies:
       '@interop/data-integrity-core': 8.9.0
 
-  '@interop/storage-core@0.42.0':
+  '@interop/storage-core@0.43.0':
     dependencies:
       '@interop/data-integrity-core': 8.9.0
 
@@ -3788,12 +3790,22 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
+  '@interop/vh-resource-log@0.10.1':
+    dependencies:
+      '@interop/did-method-webvh': 5.18.0
+      '@interop/storage-core': 0.43.0
+
+  '@interop/vh-resource-log@0.11.0(@interop/storage-core@0.43.0)':
+    dependencies:
+      '@interop/did-method-webvh': 5.18.0
+      '@interop/storage-core': 0.43.0
+
   '@interop/vh-resource-log@0.9.0':
     dependencies:
       '@interop/did-method-webvh': 5.18.0
       '@interop/storage-core': 0.38.0
 
-  '@interop/wallet-core@0.109.0(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.101.0(@interop/jsonld-signatures@11.9.0))':
+  '@interop/wallet-core@0.111.0(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.103.0(@interop/jsonld-signatures@11.9.0))':
     dependencies:
       '@interop/capability-agent': 0.2.2
       '@interop/data-integrity-core': 8.9.0
@@ -3804,7 +3816,7 @@ snapshots:
       '@interop/ezcap': 7.5.4
       '@interop/social-core': 0.8.1
       '@interop/vh-resource-log': 0.9.0
-      '@interop/was-client': 0.101.0(@interop/jsonld-signatures@11.9.0)
+      '@interop/was-client': 0.103.0(@interop/jsonld-signatures@11.9.0)
       '@interop/x25519-key-agreement-key': 5.4.3
       '@noble/ciphers': 2.4.0
       '@noble/hashes': 2.4.0
@@ -3815,7 +3827,7 @@ snapshots:
       - expo-crypto
       - react-native-get-random-values
 
-  '@interop/wallet-request@0.5.2':
+  '@interop/wallet-request@0.6.0':
     dependencies:
       '@interop/capability-agent': 0.2.2
       '@interop/data-integrity-core': 8.9.0
@@ -3824,12 +3836,14 @@ snapshots:
       '@interop/jsonld-signatures': 11.9.0
       '@interop/security-document-loader': 10.1.6
       '@interop/vc': 11.1.2
+      '@interop/was-client': 0.103.0(@interop/jsonld-signatures@11.9.0)
       '@scure/base': 2.4.0
       byoe-context: 0.5.0
     transitivePeerDependencies:
+      - expo-crypto
       - react-native-get-random-values
 
-  '@interop/was-client@0.101.0(@interop/jsonld-signatures@11.9.0)':
+  '@interop/was-client@0.103.0(@interop/jsonld-signatures@11.9.0)':
     dependencies:
       '@interop/capability-agent': 0.2.2
       '@interop/data-integrity-core': 8.9.0
@@ -3838,8 +3852,8 @@ snapshots:
       '@interop/ezcap': 7.5.4
       '@interop/http-client': 1.0.5
       '@interop/minimal-cipher': 7.11.1
-      '@interop/storage-core': 0.42.0
-      '@interop/vh-resource-log': 0.9.0
+      '@interop/storage-core': 0.43.0
+      '@interop/vh-resource-log': 0.10.1
       '@interop/x25519-key-agreement-key': 5.4.3
       '@interop/zcap': 11.4.0
       '@noble/hashes': 2.4.0
@@ -3850,14 +3864,61 @@ snapshots:
       - expo-crypto
       - react-native-get-random-values
 
-  '@interop/was-sync@0.11.0(@interop/was-client@0.101.0(@interop/jsonld-signatures@11.9.0))(rxdb@17.6.0(react@19.3.1)(rxjs@7.8.2)(typescript@6.0.3))':
+  '@interop/was-sync@0.11.0(@interop/was-client@0.103.0(@interop/jsonld-signatures@11.9.0))(rxdb@17.6.0(react@19.3.1)(rxjs@7.8.2)(typescript@6.0.3))':
     dependencies:
       '@interop/social-core': 0.8.1
-      '@interop/was-client': 0.101.0(@interop/jsonld-signatures@11.9.0)
+      '@interop/was-client': 0.103.0(@interop/jsonld-signatures@11.9.0)
       json-canonicalize: 3.0.1
       uuidv7: 1.2.1
     optionalDependencies:
       rxdb: 17.6.0(react@19.3.1)(rxjs@7.8.2)(typescript@6.0.3)
+
+  '@interop/web-spaces-server@0.45.0':
+    dependencies:
+      '@fastify/cors': 11.3.1
+      '@fastify/multipart': 10.1.6
+      '@fastify/static': 10.1.8
+      '@fastify/view': 12.0.1
+      '@interop/bnid': 6.0.2
+      '@interop/data-integrity-core': 8.9.0
+      '@interop/data-integrity-proof': 3.4.8
+      '@interop/did-method-key': 7.5.1
+      '@interop/did-method-webvh': 5.18.0
+      '@interop/ed25519-signature': 7.2.5(@interop/jsonld-signatures@11.9.0)
+      '@interop/ed25519-verification-key': 8.2.2
+      '@interop/ezcap': 7.5.4
+      '@interop/http-digest-header': 3.2.0
+      '@interop/http-signature-header': 5.0.3
+      '@interop/http-signature-zcap-invoke': 6.3.0
+      '@interop/http-signature-zcap-verify': 12.2.7
+      '@interop/jsonld-signatures': 11.9.0
+      '@interop/lru-memoize': 4.0.3
+      '@interop/minimal-cipher': 7.11.1
+      '@interop/security-document-loader': 10.1.6
+      '@interop/space-archive': 0.11.1
+      '@interop/storage-core': 0.43.0
+      '@interop/x25519-key-agreement-key': 5.4.3
+      '@interop/zcap': 11.4.0
+      '@scure/base': 2.4.0
+      fastify: 5.12.7
+      fastify-plugin: 6.0.1
+      handlebars: 4.7.10
+      lru-cache: 11.5.2
+      mime-types: 3.0.2
+      pg: 8.23.1
+      pino: 10.4.0
+      pino-pretty: 13.2.0
+      tar-stream: 3.2.2
+      undici: 8.10.0
+      uuid: 14.0.3
+      yaml: 2.9.1
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - expo-crypto
+      - pg-native
+      - react-native-b4a
+      - react-native-get-random-values
 
   '@interop/x25519-key-agreement-key@5.4.3':
     dependencies:
@@ -5796,52 +5857,6 @@ snapshots:
   w3c-xmlserializer@5.0.0:
     dependencies:
       xml-name-validator: 5.0.0
-
-  was-teaching-server@0.42.3:
-    dependencies:
-      '@fastify/cors': 11.3.1
-      '@fastify/multipart': 10.1.6
-      '@fastify/static': 10.1.8
-      '@fastify/view': 12.0.1
-      '@interop/bnid': 6.0.2
-      '@interop/data-integrity-core': 8.9.0
-      '@interop/data-integrity-proof': 3.4.8
-      '@interop/did-method-key': 7.5.1
-      '@interop/did-method-webvh': 5.18.0
-      '@interop/ed25519-signature': 7.2.5(@interop/jsonld-signatures@11.9.0)
-      '@interop/ed25519-verification-key': 8.2.2
-      '@interop/http-digest-header': 3.2.0
-      '@interop/http-signature-header': 5.0.3
-      '@interop/http-signature-zcap-invoke': 6.3.0
-      '@interop/http-signature-zcap-verify': 12.2.7
-      '@interop/jsonld-signatures': 11.9.0
-      '@interop/lru-memoize': 4.0.3
-      '@interop/minimal-cipher': 7.11.1
-      '@interop/security-document-loader': 10.1.6
-      '@interop/space-archive': 0.8.3
-      '@interop/storage-core': 0.38.0
-      '@interop/x25519-key-agreement-key': 5.4.3
-      '@interop/zcap': 11.4.0
-      '@scure/base': 2.4.0
-      fastify: 5.12.7
-      fastify-plugin: 6.0.1
-      handlebars: 4.7.10
-      lru-cache: 11.5.2
-      mime-types: 3.0.2
-      pg: 8.23.1
-      pino: 10.4.0
-      pino-pretty: 13.2.0
-      tar-stream: 3.2.2
-      undici: 8.10.0
-      uuid: 14.0.3
-      yaml: 2.9.1
-    transitivePeerDependencies:
-      - bare-abort-controller
-      - bare-buffer
-      - expo-crypto
-      - pg-native
-      - react-native-b4a
-      - react-native-get-random-values
 
   web-request-rpc@3.0.1: {}
 
