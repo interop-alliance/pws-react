@@ -1,6 +1,6 @@
 # @interop/pws-react Changelog
 
-## 0.33.0 - TBD
+## 0.33.0 - 2026-10-30
 
 ### Changed
 
