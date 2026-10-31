@@ -69,8 +69,7 @@ import {
   clientSigningKeyMultibase,
   ensureDidWebvh,
   mintClientWebvhUpdateKeys,
-  // wallet-core still exports this builder under its former prefix.
-  wasWebvhIdStore as pwsWebvhIdStore,
+  pwsWebvhIdStore,
   webvhZcapClient
 } from '@interop/wallet-core/webvh'
 import {

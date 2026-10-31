@@ -37,15 +37,17 @@ export interface Logger {
   error(msg: string, data?: Record<string, unknown>): void
 }
 
+const LOG_PREFIX = '[pws-react]'
+
 const consoleFallback: Logger = {
   debug: (msg, data) =>
-    console.debug('[pws-react]', msg, ...(data === undefined ? [] : [data])),
+    console.debug(LOG_PREFIX, msg, ...(data === undefined ? [] : [data])),
   info: (msg, data) =>
-    console.info('[pws-react]', msg, ...(data === undefined ? [] : [data])),
+    console.info(LOG_PREFIX, msg, ...(data === undefined ? [] : [data])),
   warn: (msg, data) =>
-    console.warn('[pws-react]', msg, ...(data === undefined ? [] : [data])),
+    console.warn(LOG_PREFIX, msg, ...(data === undefined ? [] : [data])),
   error: (msg, data) =>
-    console.error('[pws-react]', msg, ...(data === undefined ? [] : [data]))
+    console.error(LOG_PREFIX, msg, ...(data === undefined ? [] : [data]))
 }
 
 let logger: Logger = consoleFallback

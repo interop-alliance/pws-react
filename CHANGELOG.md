@@ -40,7 +40,7 @@
   to be re-provisioned.
 - Breaking: the replication driver is now `@interop/pws-sync` 0.13.0 (renamed
   from `@interop/was-sync`).
-- `@interop/wallet-core` is now 0.112.0, which is on `@interop/pws-client` too,
+- `@interop/wallet-core` is now 0.113.0, which is on `@interop/pws-client` too,
   so a wallet and this library read each other's envelopes.
 - The in-process test server dependency is now `@interop/web-spaces-server`
   0.45.0 (renamed from `was-teaching-server`).
