@@ -14,13 +14,13 @@
  *
  * A consumer that never calls {@link setLogger} keeps a console fallback:
  * same channel and level as a bare `console.*` call, but with a
- * `'[was-react]'` prefix and the call's `data` passed as a single trailing
+ * `'[pws-react]'` prefix and the call's `data` passed as a single trailing
  * argument (present only when supplied). An app wires a real logger once at
- * bootstrap, e.g. `setLogger(createLogger('wr'))`.
+ * bootstrap, e.g. `setLogger(createLogger('pr'))`.
  *
  * {@link setLogger} also installs the same logger into `@interop/pws-sync`,
  * the replication driver this package runs on, so one call wires both and the
- * driver's diagnostics arrive under the app's `wr` namespace.
+ * driver's diagnostics arrive under the app's `pr` namespace.
  */
 import { setLogger as setPwsSyncLogger } from '@interop/pws-sync'
 
@@ -39,13 +39,13 @@ export interface Logger {
 
 const consoleFallback: Logger = {
   debug: (msg, data) =>
-    console.debug('[was-react]', msg, ...(data === undefined ? [] : [data])),
+    console.debug('[pws-react]', msg, ...(data === undefined ? [] : [data])),
   info: (msg, data) =>
-    console.info('[was-react]', msg, ...(data === undefined ? [] : [data])),
+    console.info('[pws-react]', msg, ...(data === undefined ? [] : [data])),
   warn: (msg, data) =>
-    console.warn('[was-react]', msg, ...(data === undefined ? [] : [data])),
+    console.warn('[pws-react]', msg, ...(data === undefined ? [] : [data])),
   error: (msg, data) =>
-    console.error('[was-react]', msg, ...(data === undefined ? [] : [data]))
+    console.error('[pws-react]', msg, ...(data === undefined ? [] : [data]))
 }
 
 let logger: Logger = consoleFallback

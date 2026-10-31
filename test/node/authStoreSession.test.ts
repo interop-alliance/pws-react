@@ -86,7 +86,7 @@ function baseConfig(collections: { key: string; id: string }[]): PwsAppConfig {
     appUrl: 'http://localhost:5173/test-app',
     // A unique base name per config so the RxDB databases never collide
     // across tests sharing the one process-wide fake-indexeddb.
-    dbName: `was-react-${Math.random().toString(36).slice(2)}`
+    dbName: `pws-react-${Math.random().toString(36).slice(2)}`
   }
 }
 
@@ -102,7 +102,7 @@ function pastIso(ms: number): string {
 
 function newSeedStore(): SeedStore {
   return createSeedStore({
-    dbName: `was-react-session-${Math.random().toString(36).slice(2)}`,
+    dbName: `pws-react-session-${Math.random().toString(36).slice(2)}`,
     idb: new IDBFactory()
   })
 }
@@ -277,7 +277,7 @@ describe('activateConnected fallback on failure', () => {
     await store.getState().boot()
     expect(store.getState().status).toBe('local')
 
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     try {
       const seed = crypto.getRandomValues(new Uint8Array(32))

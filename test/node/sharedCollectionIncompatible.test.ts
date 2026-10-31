@@ -131,7 +131,7 @@ describe('SharedCollectionReader over incompatible envelopes', () => {
 
   it('skips one at error level and lists the rest', async () => {
     const { reader, soundId, soundData } = await readerFixture()
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     try {
       expect(await reader.list()).toEqual([{ id: soundId, data: soundData }])

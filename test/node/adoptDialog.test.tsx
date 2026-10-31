@@ -35,7 +35,7 @@ const config: PwsAppConfig = {
   appOrigin: 'http://localhost:5173',
   collections: [{ key: 'notes', id: 'notes' }],
   appUrl: 'http://localhost:5173/test-app',
-  dbName: `was-react-${Math.random().toString(36).slice(2)}`
+  dbName: `pws-react-${Math.random().toString(36).slice(2)}`
 }
 
 const liveStores: PwsAuthStore[] = []

@@ -182,7 +182,7 @@ describe('loadCachedDescriptors', () => {
   it('warns and returns undefined when the store read throws', async () => {
     const sessionStore = fakeSeedStore()
     sessionStore.failRead = true
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     const manager = createDescriptorManager({
       collections,
@@ -294,7 +294,7 @@ describe('completeDescriptors', () => {
   })
 
   it('warns and leaves the collection fail-closed on a restore when the live read fails', async () => {
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     try {
       const manager = createDescriptorManager({

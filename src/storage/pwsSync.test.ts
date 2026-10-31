@@ -171,7 +171,7 @@ describe('readRemoteDescriptors', () => {
 
 describe('startPwsSync under a refused source', () => {
   it('installs nothing and caches nothing', async () => {
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     const remote = stubRemoteStore(
       { notes: descriptor, tasks: descriptor },
@@ -217,7 +217,7 @@ describe('startPwsSync under a refused source', () => {
 
 describe('startPwsSync descriptor read failure', () => {
   it('skips the failed collection entirely and bootstraps the rest', async () => {
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     const remote = stubRemoteStore({
       notes: descriptor,
@@ -268,7 +268,7 @@ describe('startPwsSync descriptor read failure', () => {
 
 describe('startPwsSync hook failure', () => {
   it('costs the collection whose cipher rebuild throws, and replicates the rest', async () => {
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     const remote = stubRemoteStore({ notes: descriptor, tasks: descriptor })
     // The served roster lists epochs and leaves this app out: the rebuild is
@@ -401,7 +401,7 @@ describe('startPwsSync blinded-index schema install', () => {
   })
 
   it('warns and skips the install when the re-read fails', async () => {
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     const remote = stubRemoteStore(
       { notes: blinded, tasks: undefined },

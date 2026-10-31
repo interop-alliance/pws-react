@@ -40,7 +40,7 @@ async function openStore(seedByte: number): Promise<LocalStore> {
     keyAgreementKey,
     keyResolver,
     collections: COLLECTIONS,
-    dbName: `was-react-adopt-${++dbCounter}`,
+    dbName: `pws-react-adopt-${++dbCounter}`,
     // Epoch-from-birth: each replica's private collection needs an
     // epoch-bearing descriptor sealed to its own identity KAK.
     descriptors: {

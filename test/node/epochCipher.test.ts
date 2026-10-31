@@ -381,7 +381,7 @@ describe('LocalStore epoch-descriptor refresh', () => {
     })
     store.setDescriptorSource(source)
 
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     try {
       await expect(store.listEntities(COLLECTION_KEY)).rejects.toThrow()

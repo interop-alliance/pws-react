@@ -10,11 +10,11 @@
  *
  * E2E seam (non-production builds only): the real CHAPI channel needs the
  * mediator's cross-origin handshake, which a test harness cannot perform.
- * When a Playwright spec sets `window.__WAS_REACT_E2E_CHAPI__ = true` (via
- * addInitScript), requests are queued on `window.__WAS_REACT_E2E_CHAPI_REQUESTS__`
+ * When a Playwright spec sets `window.__PWS_REACT_E2E_CHAPI__ = true` (via
+ * addInitScript), requests are queued on `window.__PWS_REACT_E2E_CHAPI_REQUESTS__`
  * instead; the spec observes them, drives the wallet page directly (using
  * freewallet's own `__E2E_CHAPI_GET_EVENT__` injection), and posts the wallet
- * response into `window.__WAS_REACT_E2E_CHAPI_RESPONSES__[id]`. Responses use
+ * response into `window.__PWS_REACT_E2E_CHAPI_RESPONSES__[id]`. Responses use
  * the CHAPI WebCredential wire shape `{ dataType, data } | null`.
  */
 import { loadOnce } from 'credential-handler-polyfill'
@@ -35,13 +35,13 @@ interface ChapiWireResponse {
 }
 
 interface E2eBridgeWindow extends Window {
-  __WAS_REACT_E2E_CHAPI__?: boolean
-  __WAS_REACT_E2E_CHAPI_REQUESTS__?: Array<{
+  __PWS_REACT_E2E_CHAPI__?: boolean
+  __PWS_REACT_E2E_CHAPI_REQUESTS__?: Array<{
     id: number
     type: 'get'
     body: unknown
   }>
-  __WAS_REACT_E2E_CHAPI_RESPONSES__?: Record<number, ChapiWireResponse | null>
+  __PWS_REACT_E2E_CHAPI_RESPONSES__?: Record<number, ChapiWireResponse | null>
 }
 
 /**
@@ -58,7 +58,7 @@ function buildMode(): string {
 function e2eBridgeActive(): boolean {
   return (
     buildMode() !== 'production' &&
-    (window as E2eBridgeWindow).__WAS_REACT_E2E_CHAPI__ === true
+    (window as E2eBridgeWindow).__PWS_REACT_E2E_CHAPI__ === true
   )
 }
 
@@ -70,15 +70,15 @@ let e2eRequestId = 0
  */
 async function e2eRoundTrip(body: unknown): Promise<ChapiWireResponse | null> {
   const win = window as E2eBridgeWindow
-  win.__WAS_REACT_E2E_CHAPI_REQUESTS__ ??= []
-  win.__WAS_REACT_E2E_CHAPI_RESPONSES__ ??= {}
+  win.__PWS_REACT_E2E_CHAPI_REQUESTS__ ??= []
+  win.__PWS_REACT_E2E_CHAPI_RESPONSES__ ??= {}
   const id = ++e2eRequestId
-  win.__WAS_REACT_E2E_CHAPI_REQUESTS__.push({ id, type: 'get', body })
+  win.__PWS_REACT_E2E_CHAPI_REQUESTS__.push({ id, type: 'get', body })
   const deadline = Date.now() + 120_000
   while (Date.now() < deadline) {
-    if (id in win.__WAS_REACT_E2E_CHAPI_RESPONSES__) {
-      const value = win.__WAS_REACT_E2E_CHAPI_RESPONSES__[id]
-      delete win.__WAS_REACT_E2E_CHAPI_RESPONSES__[id]
+    if (id in win.__PWS_REACT_E2E_CHAPI_RESPONSES__) {
+      const value = win.__PWS_REACT_E2E_CHAPI_RESPONSES__[id]
+      delete win.__PWS_REACT_E2E_CHAPI_RESPONSES__[id]
       return value ?? null
     }
     await new Promise(resolve => setTimeout(resolve, 150))

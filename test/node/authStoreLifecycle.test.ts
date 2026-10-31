@@ -71,13 +71,13 @@ function baseConfig(): PwsAppConfig {
     appUrl: 'http://localhost:5173/test-app',
     // A unique base name per config so the RxDB databases never collide across
     // tests sharing the one process-wide fake-indexeddb.
-    dbName: `was-react-${Math.random().toString(36).slice(2)}`
+    dbName: `pws-react-${Math.random().toString(36).slice(2)}`
   }
 }
 
 function newSeedStore(): SeedStore {
   return createSeedStore({
-    dbName: `was-react-session-${Math.random().toString(36).slice(2)}`,
+    dbName: `pws-react-session-${Math.random().toString(36).slice(2)}`,
     idb: new IDBFactory()
   })
 }

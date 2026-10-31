@@ -1,6 +1,6 @@
 # Architecture
 
-How `@interop/was-react` is laid out: the session state machine, how Login With
+How `@interop/pws-react` is laid out: the session state machine, how Login With
 Wallet works, the storage and sync layers, and the app-facing facades. For
 contribution conventions see [CONTRIBUTING.md](CONTRIBUTING.md); for
 agent-facing rules (toolchain, tests, repo-specific dos and don'ts) see
@@ -1005,7 +1005,7 @@ published for another location and served there fails that check; a tampered log
 fails resolution. The fetch, the resolution, and the location check are
 wallet-core's `discoverAccountLog`, the reader its own ceremonies verify an
 account log with (`verifyAccountLog` is that reader plus the expected-DID
-check), so was-react carries no copy of the body; `resolveSpaceOwner` only names
+check), so pws-react carries no copy of the body; `resolveSpaceOwner` only names
 the absent-log case after the Space asked about. The resolved `{ did, log }`
 becomes the `webvhResourceLogController` every collection-log read is verified
 against.

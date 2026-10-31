@@ -30,7 +30,7 @@ let server: Awaited<ReturnType<typeof startTestServer>> | undefined
 beforeAll(async () => {
   server = await startTestServer({
     backend: await openTempBackend({
-      prefix: 'was-react-provision-',
+      prefix: 'pws-react-provision-',
       capacityBytes: Infinity
     })
   })

@@ -2,13 +2,13 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * `@interop/was-react`: build "Bring Your Own Everything" (BYOE) apps on Wallet
- * Attached Storage -- DID-Auth login via a CHAPI wallet, local-first encrypted
- * storage, and background sync to a PWS server.
+ * `@interop/pws-react`: build "Bring Your Own Everything" (BYOE) apps on
+ * Portable Web Spaces -- DID-Auth login via a CHAPI wallet, local-first
+ * encrypted storage, and background sync to a PWS server.
  *
  * This is the core entry. The optional MUI + react-router components live at
- * `@interop/was-react/mui`; the Node-only dev-grant provisioner lives at
- * `@interop/was-react/dev`. Neither is re-exported here.
+ * `@interop/pws-react/mui`; the Node-only dev-grant provisioner lives at
+ * `@interop/pws-react/dev`. Neither is re-exported here.
  *
  * It also exports the logging port -- `setLogger` and the `Logger` type -- so
  * an app can route this library's diagnostics into its own logger.

@@ -3,7 +3,7 @@
  */
 /**
  * The tier-1 "one sandbox document" facade: `defineDocumentApp` builds the
- * whole was-react wiring (config, store registry, entity store) for an app
+ * whole pws-react wiring (config, store registry, entity store) for an app
  * whose entire model is a single key-value document -- an Excalidraw-style
  * editor, a browser-game save file -- and returns a typed `useAppDocument` hook
  * over it. The app never sees `createEntityStore`, grants parsing, or sync
@@ -71,7 +71,7 @@ interface StoredDocument<T> {
  */
 export interface DocumentApp<T extends object> {
   /**
-   * The app-wide was-react configuration (one sandbox collection,
+   * The app-wide pws-react configuration (one sandbox collection,
    * local-first onboarding). Pass to `PwsSessionProvider`.
    */
   config: PwsAppConfig

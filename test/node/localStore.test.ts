@@ -169,7 +169,7 @@ afterEach(async () => {
 
 describe('LocalStore entity CRUD', () => {
   it('round-trips insert / list and stores only ciphertext', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     const note = makeNote('Buy distinctive-oat-milk-token')
 
     await store.insertEntity(COLLECTION, note)
@@ -187,7 +187,7 @@ describe('LocalStore entity CRUD', () => {
   })
 
   it('re-encrypts in place: same envelope id, advancing sequence', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     const note = makeNote('First title')
     await store.insertEntity(COLLECTION, note)
 
@@ -213,7 +213,7 @@ describe('LocalStore entity CRUD', () => {
   })
 
   it('tombstones on delete', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     const note = makeNote('Ephemeral')
     await store.insertEntity(COLLECTION, note)
     expect(await store.listEntities<NoteDoc>(COLLECTION)).toHaveLength(1)
@@ -229,7 +229,7 @@ describe('LocalStore entity CRUD', () => {
     // The row is tombstoned under `deleteEntity` (a remote delete pulled
     // between the lookup and the removal); a second tombstone revision would
     // replicate as a redundant delete.
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     const note = makeNote('Ephemeral')
     await store.insertEntity(COLLECTION, note)
     const envelopeId = store.envelopeIdFor(COLLECTION, note.id)!
@@ -247,7 +247,7 @@ describe('LocalStore entity CRUD', () => {
   })
 
   it('upserts: inserts once then updates in place under a stable envelope', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     const note = makeNote('Upserted')
     // Hydrate first so the index exists (a singleton store hydrates before it
     // ever writes).
@@ -269,7 +269,7 @@ describe('LocalStore entity CRUD', () => {
   })
 
   it('resurrects as a create when the envelope was deleted elsewhere', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     const note = makeNote('Edited after remote delete')
     await store.insertEntity(COLLECTION, note)
     const original = await rawEnvelope(store)
@@ -296,7 +296,7 @@ describe('LocalStore entity CRUD', () => {
   })
 
   it('persists across a store reopen (survives reload)', async () => {
-    const dbName = `was-react-test-${++dbCounter}`
+    const dbName = `pws-react-test-${++dbCounter}`
     const store = await openStore(dbName)
     const note = makeNote('Durable note')
     await store.insertEntity(COLLECTION, note)
@@ -310,7 +310,7 @@ describe('LocalStore entity CRUD', () => {
   })
 
   it('remove() deletes the database: a re-init opens empty', async () => {
-    const dbName = `was-react-test-${++dbCounter}`
+    const dbName = `pws-react-test-${++dbCounter}`
     const store = await openStore(dbName)
     await store.insertEntity(COLLECTION, makeNote('Doomed note'))
     expect(await store.listEntities<NoteDoc>(COLLECTION)).toHaveLength(1)
@@ -329,7 +329,7 @@ describe('LocalStore key-epoch stamping', () => {
   it('persists the epoch the envelope was sealed under onto the row', async () => {
     const encryption = await mintDescriptor()
     const store = await openStore(
-      `was-react-test-${++dbCounter}`,
+      `pws-react-test-${++dbCounter}`,
       COLLECTIONS,
       {
         [COLLECTION]: encryption
@@ -350,7 +350,7 @@ describe('LocalStore key-epoch stamping', () => {
   it('replaces a stale epoch stamp on re-encrypt', async () => {
     const encryption = await mintDescriptor()
     const store = await openStore(
-      `was-react-test-${++dbCounter}`,
+      `pws-react-test-${++dbCounter}`,
       COLLECTIONS,
       { [COLLECTION]: encryption }
     )
@@ -473,7 +473,7 @@ async function openGatedStore(
     keyAgreementKey,
     keyResolver,
     collections: COLLECTIONS,
-    dbName: `was-react-test-${++dbCounter}`,
+    dbName: `pws-react-test-${++dbCounter}`,
     descriptors: { [COLLECTION]: encryption }
   })
   openStores.push(store)
@@ -545,7 +545,7 @@ async function sealDuplicatesThenReopen({
   winnerId: string
 }> {
   const { earlier, later } = await rotatedRosters()
-  const dbName = `was-react-test-${++dbCounter}`
+  const dbName = `pws-react-test-${++dbCounter}`
   const sealing = await openStore(dbName, COLLECTIONS, {
     [COLLECTION]: later
   })
@@ -570,7 +570,7 @@ describe('LocalStore.applyRemoteDescriptor', () => {
     // grew from is an earlier head and must be ignored, not installed.
     const { earlier, later } = await rotatedRosters()
     const store = await openStore(
-      `was-react-test-${++dbCounter}`,
+      `pws-react-test-${++dbCounter}`,
       COLLECTIONS,
       { [COLLECTION]: earlier }
     )
@@ -598,7 +598,7 @@ describe('LocalStore.applyRemoteDescriptor', () => {
 
 describe('LocalStore.applyCollectionMeta', () => {
   it('ignores an unknown id and a public collection', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
+    const store = await openStore(`pws-react-test-${++dbCounter}`, MIXED)
     expect(
       await store.applyCollectionMeta({ collectionId: 'no-such-collection' })
     ).toBe(false)
@@ -610,7 +610,7 @@ describe('LocalStore.applyCollectionMeta', () => {
   it('installs the schema so later writes carry blinded index entries', async () => {
     const encryption = await mintIndexableDescriptor()
     const store = await openStore(
-      `was-react-test-${++dbCounter}`,
+      `pws-react-test-${++dbCounter}`,
       COLLECTIONS,
       {
         [COLLECTION]: encryption
@@ -633,7 +633,7 @@ describe('LocalStore.applyCollectionMeta', () => {
   it('re-installs the schema when the cipher is rebuilt', async () => {
     const encryption = await mintIndexableDescriptor()
     const store = await openStore(
-      `was-react-test-${++dbCounter}`,
+      `pws-react-test-${++dbCounter}`,
       COLLECTIONS,
       {
         [COLLECTION]: encryption
@@ -719,7 +719,7 @@ describe('LocalStore.applyCollectionMeta', () => {
     // No cached descriptor: the collection opens fail-closed behind the
     // placeholder cipher, which has no schema to install.
     const store = await openStore(
-      `was-react-test-${++dbCounter}`,
+      `pws-react-test-${++dbCounter}`,
       COLLECTIONS,
       {}
     )
@@ -751,7 +751,7 @@ describe('LocalStore.applyCollectionMeta', () => {
   it('does not remember a metadata value the cipher cannot decode', async () => {
     const encryption = await mintIndexableDescriptor()
     const store = await openStore(
-      `was-react-test-${++dbCounter}`,
+      `pws-react-test-${++dbCounter}`,
       COLLECTIONS,
       {
         [COLLECTION]: encryption
@@ -793,12 +793,12 @@ function makeSingleton(
 
 describe('LocalStore singleton hydration', () => {
   it('returns null and an empty collection when nothing is stored', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     expect(await store.hydrateSingleton<NoteDoc>(COLLECTION)).toBeNull()
   })
 
   it('reconciles duplicate singletons to the LWW winner and tombstones the rest', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     // Two clients each created the singleton before syncing: distinct envelope
     // rows that both decrypt to `_singleton`.
     const older = makeSingleton({
@@ -832,7 +832,7 @@ describe('LocalStore singleton hydration', () => {
   })
 
   it('maps the logical id to the surviving envelope after reconciliation', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     const older = makeSingleton({
       title: 'old',
       updatedAt: '2026-01-01T00:00:00.000Z',
@@ -855,7 +855,7 @@ describe('LocalStore singleton hydration', () => {
   })
 
   it('breaks an updatedAt tie by the greater writerId', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     const at = '2026-03-03T00:00:00.000Z'
     await store.insertEntity(
       COLLECTION,
@@ -942,7 +942,7 @@ describe('LocalStore singleton hydration', () => {
       }
     })
 
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     try {
       expect(await store.hydrateSingleton<NoteDoc>(COLLECTION)).toEqual(newer)
@@ -988,7 +988,7 @@ describe('LocalStore singleton hydration', () => {
 
 describe('LocalStore public (plaintext) collections', () => {
   it('stores the payload as-is under its own logical id', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
+    const store = await openStore(`pws-react-test-${++dbCounter}`, MIXED)
     const post = makeNote('World-readable post')
 
     await store.insertEntity(PUBLIC_COLLECTION, post)
@@ -1007,7 +1007,7 @@ describe('LocalStore public (plaintext) collections', () => {
   })
 
   it('updates in place under the same row id', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
+    const store = await openStore(`pws-react-test-${++dbCounter}`, MIXED)
     const post = makeNote('First revision')
     await store.insertEntity(PUBLIC_COLLECTION, post)
 
@@ -1027,7 +1027,7 @@ describe('LocalStore public (plaintext) collections', () => {
   })
 
   it('tombstones on delete and upserts without a prior hydrate', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
+    const store = await openStore(`pws-react-test-${++dbCounter}`, MIXED)
     const post = makeNote('Short-lived')
     await store.upsertEntity(PUBLIC_COLLECTION, post)
     expect(await store.listEntities<NoteDoc>(PUBLIC_COLLECTION)).toHaveLength(1)
@@ -1037,7 +1037,7 @@ describe('LocalStore public (plaintext) collections', () => {
   })
 
   it('keeps the private collection encrypted in the same store', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
+    const store = await openStore(`pws-react-test-${++dbCounter}`, MIXED)
     const secret = makeNote('secret-note-body')
     await store.insertEntity(COLLECTION, secret)
 
@@ -1054,7 +1054,7 @@ describe('LocalStore public (plaintext) collections', () => {
   })
 
   it('skips a row whose payload id does not match its row id, and hydrates the rest', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
+    const store = await openStore(`pws-react-test-${++dbCounter}`, MIXED)
     const post = makeNote('Well-formed post')
     await store.insertEntity(PUBLIC_COLLECTION, post)
     // Written by something else holding a grant on the collection: one body
@@ -1089,7 +1089,7 @@ describe('LocalStore public (plaintext) collections', () => {
   })
 
   it('skips an EDV envelope stored in a public collection, and hydrates the rest', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
+    const store = await openStore(`pws-react-test-${++dbCounter}`, MIXED)
     const post = makeNote('Well-formed post')
     await store.insertEntity(PUBLIC_COLLECTION, post)
     // A ciphertext row in a plaintext collection: a visibility
@@ -1123,7 +1123,7 @@ describe('LocalStore public (plaintext) collections', () => {
           { key: 'a', id: 'shared' },
           { key: 'b', id: 'shared', visibility: 'public' }
         ],
-        dbName: `was-react-test-${++dbCounter}`
+        dbName: `pws-react-test-${++dbCounter}`
       })
     ).rejects.toThrow(/encrypted and public/)
   })
@@ -1131,7 +1131,7 @@ describe('LocalStore public (plaintext) collections', () => {
 
 describe('LocalStore LWW conflict-handler decrypt closure', () => {
   it('decrypts each conflict side under its OWN row id, not a payload-embedded id', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     const older = makeNote('Older edit')
     const newer: NoteDoc = {
       ...makeNote('Newer edit'),
@@ -1174,7 +1174,7 @@ describe('LocalStore LWW conflict-handler decrypt closure', () => {
   })
 
   it('propagates IntegrityError out of the conflict handler when an envelope is addressed under the wrong row id', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`)
+    const store = await openStore(`pws-react-test-${++dbCounter}`)
     await store.insertEntity(COLLECTION, makeNote('Envelope A'))
     await store.insertEntity(COLLECTION, makeNote('Envelope B'))
     const rows = (await store.rxCollection(COLLECTION).find().exec()).map(row =>
@@ -1199,7 +1199,7 @@ describe('LocalStore LWW conflict-handler decrypt closure', () => {
   })
 
   it('settles a public collection conflict on the LWW stamp when a side is mis-bound', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
+    const store = await openStore(`pws-react-test-${++dbCounter}`, MIXED)
     const post = makeNote('Well-formed post')
     await store.insertEntity(PUBLIC_COLLECTION, post)
     const localRow = (await store
@@ -1237,7 +1237,7 @@ describe('LocalStore LWW conflict-handler decrypt closure', () => {
   })
 
   it('settles a public collection conflict when the remote side is an EDV envelope', async () => {
-    const store = await openStore(`was-react-test-${++dbCounter}`, MIXED)
+    const store = await openStore(`pws-react-test-${++dbCounter}`, MIXED)
     const post = makeNote('Well-formed post')
     await store.insertEntity(PUBLIC_COLLECTION, post)
     const localRow = (await store

@@ -1,10 +1,10 @@
-# @interop/was-react _(@interop/was-react)_
+# @interop/pws-react _(@interop/pws-react)_
 
-[![NPM Version](https://img.shields.io/npm/v/@interop/was-react.svg)](https://npm.im/@interop/was-react)
+[![NPM Version](https://img.shields.io/npm/v/@interop/pws-react.svg)](https://npm.im/@interop/pws-react)
 
-> React library for building "Bring Your Own Everything" (BYOE) apps on Wallet
-> Attached Storage: DID-Auth login via a CHAPI wallet, local-first encrypted
-> storage, and background sync to a PWS server.
+> React library for building "Bring Your Own Everything" (BYOE) apps on Portable
+> Web Spaces: DID-Auth login via a CHAPI wallet, local-first encrypted storage,
+> and background sync to a PWS server.
 
 ## Table of Contents
 
@@ -39,7 +39,7 @@ nor search the plaintext. Data is local-first -- a local RxDB (IndexedDB)
 database holds the encrypted envelopes and replicates them to PWS in the
 background. The app works fully offline; sync resumes on reconnect.
 
-`@interop/was-react` is the reusable plumbing for that model, extracted from a
+`@interop/pws-react` is the reusable plumbing for that model, extracted from a
 production BYOE app. It wraps
 [`@interop/pws-client`](https://npm.im/@interop/pws-client) and owns identity
 derivation, the CHAPI login flow, the session lifecycle store, the encrypted
@@ -52,7 +52,7 @@ own domain and UI; the library owns everything in between.
 Node.js 24+ is recommended. The package is ESM-only.
 
 ```
-pnpm add @interop/was-react
+pnpm add @interop/pws-react
 ```
 
 Peer dependencies (install the ones you use):
@@ -70,7 +70,7 @@ out. `LocalStore` and `SyncController` load `rxdb` (and the replication driver's
 entry resolves without it; a missing `rxdb` surfaces at the first replica
 operation.
 
-The optional `@interop/was-react/mui` entry additionally needs `@mui/material`,
+The optional `@interop/pws-react/mui` entry additionally needs `@mui/material`,
 `@mui/icons-material`, and `react-router`; the core entry never imports them.
 
 No particular bundler is required: the library reads `import.meta.env.MODE` (a
@@ -92,7 +92,7 @@ session through the hooks. The example below wires a single `notes` collection.
 
 ```ts
 // app.config.ts
-import type { PwsAppConfig } from '@interop/was-react'
+import type { PwsAppConfig } from '@interop/pws-react'
 
 export const config: PwsAppConfig = {
   appName: 'Notes',
@@ -223,7 +223,7 @@ agent's API rather than from a wallet login, so it is read through an
 `AudienceReader` opened on the zcap directly, with the app's own signer:
 
 ```ts
-import { AudienceReader } from '@interop/was-react'
+import { AudienceReader } from '@interop/pws-react'
 
 const reader = AudienceReader.open({ zcap, signer, checkpoint: saved })
 const { changes, paused, snapshot } = await reader.pull()
@@ -244,7 +244,7 @@ id.
 
 ```ts
 // stores.ts
-import { createEntityStore, type StoreRegistry } from '@interop/was-react'
+import { createEntityStore, type StoreRegistry } from '@interop/pws-react'
 
 export interface Note {
   id: string
@@ -278,7 +278,7 @@ sync, and logout.
 
 ```tsx
 // main.tsx
-import { PwsSessionProvider } from '@interop/was-react'
+import { PwsSessionProvider } from '@interop/pws-react'
 import { config } from './app.config.js'
 import { registry } from './stores.js'
 
@@ -295,7 +295,7 @@ export function Root() {
 
 ```tsx
 // LoginPage.tsx
-import { useLogin } from '@interop/was-react'
+import { useLogin } from '@interop/pws-react'
 
 export function LoginPage() {
   const { login, authenticating: busy, phase, error } = useLogin()
@@ -447,7 +447,7 @@ to share a document, copy it into that store, and the share URL is that copy's
 resource URL:
 
 ```ts
-import { publicUrlFor } from '@interop/was-react'
+import { publicUrlFor } from '@interop/pws-react'
 import { useSharedNotes } from './stores.js'
 
 // Share: copy the doc into the public collection.
@@ -601,9 +601,9 @@ cost.
 
 | Import                   | Contents                                                                             | Extra peers                                            |
 | ------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| `@interop/was-react`     | Core: config, identity, auth, sync, storage, session store, React provider and hooks | `react`, `zustand`; `rxdb` to keep a local replica     |
-| `@interop/was-react/mui` | Optional `ProtectedRoute`, `ReconnectBanner`, `SyncStatusChip`                       | `@mui/material`, `@mui/icons-material`, `react-router` |
-| `@interop/was-react/dev` | Node-only `provisionDevGrants`                                                       | (none; Node only)                                      |
+| `@interop/pws-react`     | Core: config, identity, auth, sync, storage, session store, React provider and hooks | `react`, `zustand`; `rxdb` to keep a local replica     |
+| `@interop/pws-react/mui` | Optional `ProtectedRoute`, `ReconnectBanner`, `SyncStatusChip`                       | `@mui/material`, `@mui/icons-material`, `react-router` |
+| `@interop/pws-react/dev` | Node-only `provisionDevGrants`                                                       | (none; Node only)                                      |
 
 MUI usage:
 
@@ -613,7 +613,7 @@ import {
   ProtectedRoute,
   ReconnectBanner,
   SyncStatusChip
-} from '@interop/was-react/mui'
+} from '@interop/pws-react/mui'
 import { LoginPage } from './LoginPage.js'
 
 export function App() {
@@ -646,14 +646,14 @@ restores and the stores hydrate, redirects an unauthenticated visitor to
 The package logs through a structural `Logger` port (four two-arg methods:
 `debug`, `info`, `warn`, `error`, each taking a static message and an optional
 `data` object, with `data.err` reserved for an Error). An app that never wires
-one gets a console fallback prefixed `[was-react]`. To route the package's
+one gets a console fallback prefixed `[pws-react]`. To route the package's
 events into the app's own sinks, install a logger once at bootstrap:
 
 ```ts
 import { createLogger } from '@interop/logger'
-import { setLogger } from '@interop/was-react'
+import { setLogger } from '@interop/pws-react'
 
-setLogger(createLogger('wr'))
+setLogger(createLogger('pr'))
 ```
 
 `setLogger` returns the previously installed logger, so a test can restore it in
@@ -669,7 +669,7 @@ grants against a running web-spaces-server, so an app can dev-sync without a
 CHAPI wallet in the loop. It is Node-only (uses `node:fs`).
 
 ```ts
-import { provisionDevGrants } from '@interop/was-react/dev'
+import { provisionDevGrants } from '@interop/pws-react/dev'
 
 const result = await provisionDevGrants({
   baseServerUrl: 'http://localhost:3002/',

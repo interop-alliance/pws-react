@@ -111,7 +111,7 @@ beforeAll(async () => {
   // `baseServerUrl` the boot returns.
   server = await startTestServer({
     backend: await openTempBackend({
-      prefix: 'was-react-blinded-',
+      prefix: 'pws-react-blinded-',
       capacityBytes: Infinity
     })
   })
@@ -367,7 +367,7 @@ describe('blinded-index query against web-spaces-server', () => {
     const applied = vi
       .spyOn(LocalStore.prototype, 'applyCollectionMeta')
       .mockRejectedValue(new Error('undecodable metadata envelope'))
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
 
     const watchedController = new SyncController({

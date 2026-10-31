@@ -2,7 +2,7 @@
 
 ## Repository
 
-`@interop/was-react` is the reusable React plumbing for "Bring Your Own
+`@interop/pws-react` is the reusable React plumbing for "Bring Your Own
 Everything" (BYOE) client-side apps on Portable Web Spaces (PWS, formerly Wallet
 Attached Storage / WAS): DID-Auth login via a CHAPI wallet, a seed-derived
 did:key identity, local-first encrypted storage (an RxDB/Dexie replica of

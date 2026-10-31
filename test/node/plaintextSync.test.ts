@@ -109,7 +109,7 @@ beforeAll(async () => {
   // `baseServerUrl` the boot returns.
   server = await startTestServer({
     backend: await openTempBackend({
-      prefix: 'was-react-plaintext-',
+      prefix: 'pws-react-plaintext-',
       capacityBytes: Infinity
     })
   })

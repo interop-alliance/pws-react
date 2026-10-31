@@ -19,7 +19,7 @@ import {
 } from '../../src/identity/appSession.js'
 import { createSeedStore } from '../../src/identity/seedStore.js'
 
-const DB_NAME = 'was-react-session'
+const DB_NAME = 'pws-react-session'
 
 function newStore() {
   return createSeedStore({ dbName: DB_NAME, idb: new IDBFactory() })

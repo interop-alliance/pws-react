@@ -71,13 +71,13 @@ beforeAll(async () => {
   ;[audienceServer, appServer] = await Promise.all([
     startTestServer({
       backend: await openTempBackend({
-        prefix: 'was-react-audience-',
+        prefix: 'pws-react-audience-',
         capacityBytes: Infinity
       })
     }),
     startTestServer({
       backend: await openTempBackend({
-        prefix: 'was-react-audience-app-',
+        prefix: 'pws-react-audience-app-',
         capacityBytes: Infinity
       })
     })
@@ -152,7 +152,7 @@ async function provisionAudience(): Promise<{
 async function withCapturedLogs<T>(
   run: () => Promise<T>
 ): Promise<{ result: T; events: ReturnType<typeof captureLogger>['events'] }> {
-  const capture = captureLogger('wr')
+  const capture = captureLogger('pr')
   const previous = setLogger(capture.logger)
   try {
     return { result: await run(), events: capture.events }

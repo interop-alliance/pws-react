@@ -35,7 +35,7 @@ let provisioned: Awaited<ReturnType<typeof provisionDevGrants>>
 beforeAll(async () => {
   server = await startTestServer({
     backend: await openTempBackend({
-      prefix: 'was-react-owner-',
+      prefix: 'pws-react-owner-',
       capacityBytes: Infinity
     })
   })

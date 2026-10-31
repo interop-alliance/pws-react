@@ -90,7 +90,7 @@ function baseConfig(): PwsAppConfig {
     collections: [{ key: 'notes', id: 'notes', visibility: 'public' }],
     // A unique base name per test so the databases never collide across tests
     // sharing the one process-wide fake-indexeddb.
-    dbName: `was-react-${Math.random().toString(36).slice(2)}`
+    dbName: `pws-react-${Math.random().toString(36).slice(2)}`
   }
 }
 
@@ -353,7 +353,7 @@ describe('executeLocalWipe', () => {
   })
 
   it('reports what it could not confirm on an engine without databases()', async () => {
-    const dbName = `was-react-${Math.random().toString(36).slice(2)}`
+    const dbName = `pws-react-${Math.random().toString(36).slice(2)}`
     const idb = new IDBFactory()
     // Give the seed store something real to delete.
     await createDatabase({ idb, name: `${dbName}-anon` })

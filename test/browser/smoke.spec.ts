@@ -79,7 +79,7 @@ test('the core entry imports and exposes its public API in the browser', async (
   expect(exports.startPwsSync).toBe('function')
   expect(exports.parseGrants).toBe('function')
   expect(exports.createDocumentLoader).toBe('function')
-  expect(exports.DEFAULT_DB_NAME).toBe('was-react')
+  expect(exports.DEFAULT_DB_NAME).toBe('pws-react')
 })
 
 test('the mui subpath imports and exposes its components', async ({ page }) => {

@@ -247,7 +247,7 @@ describe('App Connect grant checking', () => {
     mockGet.mockImplementation(async ({ vpr }) =>
       walletVp({ challenge: vpr.challenge as string, credential })
     )
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
 
     const outcome = await loginWithWallet({
@@ -281,7 +281,7 @@ describe('App Connect grant checking', () => {
     )
     // A capture logger of this test's own, so an earlier test's events cannot
     // reach the assertion below.
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
 
     const outcome = await loginWithWallet({

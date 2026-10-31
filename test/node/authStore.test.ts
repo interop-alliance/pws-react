@@ -167,13 +167,13 @@ function baseConfig(): PwsAppConfig {
     appUrl: 'http://localhost:5173/test-app',
     // A unique base name per config so the RxDB / IndexedDB databases never
     // collide across tests sharing the one process-wide fake-indexeddb.
-    dbName: `was-react-${Math.random().toString(36).slice(2)}`
+    dbName: `pws-react-${Math.random().toString(36).slice(2)}`
   }
 }
 
 function newSeedStore(): SeedStore {
   return createSeedStore({
-    dbName: `was-react-session-${Math.random().toString(36).slice(2)}`,
+    dbName: `pws-react-session-${Math.random().toString(36).slice(2)}`,
     idb: new IDBFactory()
   })
 }
@@ -413,7 +413,7 @@ describe('boot()', () => {
   })
 
   it('still lands connected when a descriptor read fails during the restore', async () => {
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     const seedStore = newSeedStore()
     const { controllerDid } = await persistSession({ seedStore })
@@ -1141,7 +1141,7 @@ describe('adoption', () => {
     // The post-activation cleanup fails (an anonymous database still open in
     // another tab, an IndexedDB quota error). Best-effort: the login must still
     // report the live, connected session.
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     vi.spyOn(LocalStore, 'removeDatabase').mockRejectedValue(
       new Error('database is locked')
@@ -1273,7 +1273,7 @@ describe('adoption', () => {
       config,
       seedStore
     )
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
 
     // A real unmount: destroy, and nothing re-mounts. The provider is gone.

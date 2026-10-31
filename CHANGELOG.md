@@ -1,4 +1,4 @@
-# @interop/was-react Changelog
+# @interop/pws-react Changelog
 
 ## 0.33.0 - TBD
 
@@ -11,17 +11,33 @@
 - Breaking: this package's `Was*` exports are renamed to `Pws*`: `PwsAppConfig`,
   `PwsCollectionConfig`, `PwsSyncConfig`, `PwsExpiryConfig`, `PwsRemoteStore`,
   `PwsAuthStore`, `PwsSessionProvider`, `PwsSessionContext`, `PwsSyncBootstrap`,
-  `startPwsSync`, and `createPwsSyncPort`. The npm package name is unchanged.
+  `startPwsSync`, and `createPwsSyncPort`.
+- Breaking: the package is renamed from `@interop/was-react` to
+  `@interop/pws-react`, including its `./mui` and `./dev` entries.
+- Breaking: the storage defaults derived from the package name change with it.
+  `DEFAULT_DB_NAME` is `pws-react` and `DEFAULT_STORAGE_KEY_PREFIX` is
+  `pws-react:`. An app on these defaults opens a fresh replica and mints a new
+  `writerId`. There is no migration. `clearLocalData()` does not reach anything
+  stored under the old defaults, including the wallet seed in
+  `was-react-session`, so it stays on the browser until removed by hand.
+- `DEFAULT_IDENTITY_HANDLE` is `pws-react`. The handle is cosmetic and does not
+  affect keys or the derived DID.
+- The console fallback logger's prefix is `[pws-react]` in place of
+  `[was-react]`.
+- Breaking: the Playwright CHAPI bridge globals are renamed to
+  `__PWS_REACT_E2E_CHAPI__`, `__PWS_REACT_E2E_CHAPI_REQUESTS__`, and
+  `__PWS_REACT_E2E_CHAPI_RESPONSES__`.
 - Breaking: `defineDocumentApp` export files are tagged `pws-document/v1` in
   place of `was-document/v1`, and a file carrying the old tag is refused on
   import.
 - Breaking: encrypted envelopes bind the `pws` JWE protected-header parameter in
   place of `was`, with no fallback. Envelopes written by earlier versions no
-  longer decrypt, locally or from a server. A private replica holding such rows
-  fails hydration with `EncryptionError`: a connected session lands `local` with
-  `error`, and an anonymous one stays on `boot` with `error`. There is no
-  migration. Only `clearLocalData()` recovers a replica, and a Space sealed
-  under `was` has to be re-provisioned.
+  longer decrypt, locally or from a server. An app with its own `dbName` reopens
+  its old replica, and a private replica holding such rows fails hydration with
+  `EncryptionError`: a connected session lands `local` with `error`, and an
+  anonymous one stays on `boot` with `error`. There is no migration. Only
+  `clearLocalData()` recovers such a replica, and a Space sealed under `was` has
+  to be re-provisioned.
 - Breaking: the replication driver is now `@interop/pws-sync` 0.13.0 (renamed
   from `@interop/was-sync`).
 - `@interop/wallet-core` is now 0.112.0, which is on `@interop/pws-client` too,

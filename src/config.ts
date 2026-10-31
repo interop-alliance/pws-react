@@ -249,7 +249,7 @@ export type StoreRegistry = Record<string, StoreRegistryEntry>
 /**
  * Default base name for the local RxDB database + session IndexedDB naming.
  */
-export const DEFAULT_DB_NAME = 'was-react'
+export const DEFAULT_DB_NAME = 'pws-react'
 
 /**
  * Default onboarding mode: `'login-gated'`, preserving the historical
@@ -258,9 +258,9 @@ export const DEFAULT_DB_NAME = 'was-react'
 export const DEFAULT_ONBOARDING = 'login-gated'
 
 /**
- * Default `localStorage` key prefix (e.g. `was-react:writerId`).
+ * Default `localStorage` key prefix (e.g. `pws-react:writerId`).
  */
-export const DEFAULT_STORAGE_KEY_PREFIX = 'was-react:'
+export const DEFAULT_STORAGE_KEY_PREFIX = 'pws-react:'
 
 /**
  * Default periodic re-sync interval (ms). The pull side is poll-based (no

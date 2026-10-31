@@ -44,7 +44,7 @@ function baseConfig(onboarding: 'local-first' | 'login-gated'): PwsAppConfig {
     onboarding,
     collections: [{ key: 'notes', id: 'notes' }],
     appUrl: 'http://localhost:5173/test-app',
-    dbName: `was-react-${Math.random().toString(36).slice(2)}`
+    dbName: `pws-react-${Math.random().toString(36).slice(2)}`
   }
 }
 

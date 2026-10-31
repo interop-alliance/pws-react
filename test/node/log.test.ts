@@ -34,7 +34,7 @@ describe('the console fallback', () => {
 
     log.warn('x', { a: 1 })
 
-    expect(warn).toHaveBeenCalledWith('[was-react]', 'x', { a: 1 })
+    expect(warn).toHaveBeenCalledWith('[pws-react]', 'x', { a: 1 })
   })
 
   it('passes no trailing argument when called with no data', () => {
@@ -42,7 +42,7 @@ describe('the console fallback', () => {
 
     log.warn('x')
 
-    expect(warn).toHaveBeenCalledWith('[was-react]', 'x')
+    expect(warn).toHaveBeenCalledWith('[pws-react]', 'x')
   })
 })
 
@@ -59,7 +59,7 @@ describe('setLogger', () => {
   })
 
   it('routes calls to the installed logger and reports structured events', () => {
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
 
     const err = new Error('boom')
@@ -67,7 +67,7 @@ describe('setLogger', () => {
 
     expect(capture.events).toHaveLength(1)
     const event = capture.events[0]!
-    expect(event.ns).toBe('wr')
+    expect(event.ns).toBe('pr')
     expect(event.level).toBe('warn')
     expect(event.msg).toBe('msg')
     expect(event.err).toBe(err)

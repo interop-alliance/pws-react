@@ -343,7 +343,7 @@ describe('SharedCollectionReader', () => {
     const readable = { id: 'credential-2', title: 'under the sound epoch' }
     const sound = await rotatedCipher.encrypt({ data: readable })
 
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     try {
       const reader = await SharedCollectionReader.open({
@@ -443,7 +443,7 @@ describe('SharedCollectionReader.list', () => {
     const second = await encrypt({ id: 'credential-2', title: 'two' })
     const collectionUrl = `https://was.example/space/space-1/${COLLECTION_ID}/`
 
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     try {
       const remoteStore = fakeRemoteStore({
@@ -494,7 +494,7 @@ describe('SharedCollectionReader.list', () => {
     const first = await encrypt({ id: 'credential-1', title: 'one' })
     const second = await encrypt({ id: 'credential-2', title: 'two' })
 
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     try {
       const remoteStore = fakeRemoteStore({
@@ -619,7 +619,7 @@ describe('SharedCollectionReader mid-session revoke', () => {
   it('warns and skips the undecryptable resources instead of failing list()', async () => {
     const { app, stale, readable, unreadable } = await revokeFixture()
 
-    const capture = captureLogger('wr')
+    const capture = captureLogger('pr')
     const previous = setLogger(capture.logger)
     try {
       const remoteStore = fakeRemoteStore({

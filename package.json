@@ -1,5 +1,5 @@
 {
-  "name": "@interop/was-react",
+  "name": "@interop/pws-react",
   "description": "React library for building 'Bring Your Own Everything' (BYOE) apps on Portable Web Spaces: DID Auth login via CHAPI wallet, local-first encrypted storage, and background sync to a PWS server.",
   "version": "0.32.0",
   "type": "module",
@@ -147,8 +147,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/interop-alliance/was-react.git"
+    "url": "git+https://github.com/interop-alliance/pws-react.git"
   },
-  "homepage": "https://github.com/interop-alliance/was-react",
-  "bugs": "https://github.com/interop-alliance/was-react/issues"
+  "homepage": "https://github.com/interop-alliance/pws-react",
+  "bugs": "https://github.com/interop-alliance/pws-react/issues"
 }

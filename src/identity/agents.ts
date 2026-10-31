@@ -56,7 +56,7 @@ import type {
  * Default cosmetic label for the master identity agent. Local naming only (does
  * not affect key material or the derived did:key); safe to override.
  */
-export const DEFAULT_IDENTITY_HANDLE = 'was-react'
+export const DEFAULT_IDENTITY_HANDLE = 'pws-react'
 
 // PINNED key-derivation input (the HMAC message that, with the seed, selects
 // the key). Changing it after first use is a data-migration event.

@@ -1,6 +1,6 @@
 # Contributing
 
-Editor setup and code style conventions for `@interop/was-react`. Coding agents
+Editor setup and code style conventions for `@interop/pws-react`. Coding agents
 receive this file via the include in [AGENTS.md](AGENTS.md); for a map of the
 codebase, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
