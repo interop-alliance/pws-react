@@ -11,7 +11,7 @@
  *
  * A share fuses two axes, and both are needed here:
  *
- * - **pull** -- the delegated `GET`/`HEAD` zcap on the collection, which is what
+ * - **pull** -- the delegated `GET` zcap on the collection, which is what
  *   the server checks at request time;
  * - **read** -- an entry in the collection's key-epoch roster, wrapped to this
  *   app's IDENTITY key-agreement key (the X25519 twin of its did:key

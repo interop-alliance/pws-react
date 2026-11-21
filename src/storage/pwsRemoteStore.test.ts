@@ -8,7 +8,11 @@ import type {
   IKeyResolver,
   IZcap
 } from '@interop/data-integrity-core'
-import { NotImplementedError, PwsServerError } from '@interop/pws-client'
+import {
+  NotImplementedError,
+  PwsServerError,
+  SpaceGrantRequiredError
+} from '@interop/pws-client'
 import type { CollectionMetadata } from '@interop/pws-client'
 import { PwsRemoteStore } from './pwsRemoteStore.js'
 import { createSpaceTrust } from './spaceTrust.js'
@@ -36,6 +40,28 @@ const parsed: ParsedGrants = {
 }
 
 const zcapClient = {} as unknown as ZcapClient
+
+/**
+ * The grant set an app actually holds: delegated capabilities (they carry a
+ * `parentCapability`), each targeting its Collection's container URL. The
+ * stubs above carry no parent, so pws-client reads them as root-like and
+ * does not check their target.
+ */
+const collectionScoped: ParsedGrants = {
+  spaceUrl: parsed.spaceUrl,
+  byCollectionId: {
+    'microblog-posts': {
+      id: 'urn:zcap:pub-delegated',
+      parentCapability: 'urn:zcap:root:space-1',
+      invocationTarget: 'https://was.example/space/space-1/microblog-posts/'
+    } as unknown as IZcap,
+    notes: {
+      id: 'urn:zcap:priv-delegated',
+      parentCapability: 'urn:zcap:root:space-1',
+      invocationTarget: 'https://was.example/space/space-1/notes/'
+    } as unknown as IZcap
+  }
+}
 
 /**
  * The service description a v0.5 server publishes, answered by a stubbed
@@ -432,6 +458,50 @@ describe('PwsRemoteStore.declareCollectionIndexes', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('skips the write when the stored list holds more, in another order', async () => {
+    // The wallet declares for every reader of the collection.
+    const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
+    const store = PwsRemoteStore.fromGrants({
+      parsed,
+      zcapClient: stub,
+      collections
+    })
+    expect(
+      await store.declareCollectionIndexes('microblog-posts', {
+        current: metaRead({
+          id: 'microblog-posts',
+          type: ['Collection'],
+          plaintext: { indexes: ['inReplyTo', 'title', 'author'] }
+        })
+      })
+    ).toEqual({
+      collectionId: 'microblog-posts',
+      ok: true,
+      skipped: true
+    })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('adds a missing index without dropping the stored ones', async () => {
+    const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
+    const store = PwsRemoteStore.fromGrants({
+      parsed,
+      zcapClient: stub,
+      collections
+    })
+    await store.declareCollectionIndexes('microblog-posts', {
+      current: metaRead({
+        id: 'microblog-posts',
+        type: ['Collection'],
+        plaintext: { indexes: ['title', 'author'] }
+      })
+    })
+    expect(calls[0]?.json).toEqual({
+      id: 'microblog-posts',
+      plaintext: { indexes: ['title', 'author', 'inReplyTo'] }
+    })
+  })
+
   it('writes over a stale declaration, keeping the rest of plaintext', async () => {
     const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
     const store = PwsRemoteStore.fromGrants({
@@ -530,6 +600,70 @@ describe('PwsRemoteStore.declareCollectionIndexes', () => {
       custom: { tags: { topic: 'birds' } },
       plaintext: { indexes: ['author', 'inReplyTo'] }
     })
+  })
+
+  it('reports the refusal of a Collection-scoped grant by name, sending nothing', async () => {
+    const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
+    const store = PwsRemoteStore.fromGrants({
+      parsed: collectionScoped,
+      zcapClient: stub,
+      collections
+    })
+    const result = await store.declareCollectionIndexes('microblog-posts', {
+      current: metaRead({ id: 'microblog-posts', type: ['Collection'] })
+    })
+    expect(result).toMatchObject({
+      collectionId: 'microblog-posts',
+      ok: false,
+      status: 404,
+      errorName: 'SpaceGrantRequiredError'
+    })
+    expect(result.error).toMatch(/Space URL/)
+    // pws-client refuses before the request, so no Metadata write went out.
+    expect(calls).toHaveLength(0)
+  })
+
+  it('skips with no refusal under a Collection-scoped grant once the wallet declared the indexes', async () => {
+    const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
+    const store = PwsRemoteStore.fromGrants({
+      parsed: collectionScoped,
+      zcapClient: stub,
+      collections
+    })
+    expect(
+      await store.declareCollectionIndexes('microblog-posts', {
+        current: metaRead({
+          id: 'microblog-posts',
+          type: ['Collection'],
+          plaintext: { indexes: ['author', 'inReplyTo'] }
+        })
+      })
+    ).toEqual({ collectionId: 'microblog-posts', ok: true, skipped: true })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('writes under a delegated grant on the Space URL', async () => {
+    const { calls, zcapClient: stub } = stubZcapClient([{ status: 204 }])
+    const store = PwsRemoteStore.fromGrants({
+      parsed: {
+        spaceUrl: parsed.spaceUrl,
+        byCollectionId: {
+          'microblog-posts': {
+            id: 'urn:zcap:space-delegated',
+            parentCapability: 'urn:zcap:root:space-1',
+            invocationTarget: parsed.spaceUrl
+          } as unknown as IZcap
+        }
+      },
+      zcapClient: stub,
+      collections
+    })
+    expect(
+      await store.declareCollectionIndexes('microblog-posts', {
+        current: metaRead({ id: 'microblog-posts', type: ['Collection'] })
+      })
+    ).toEqual({ collectionId: 'microblog-posts', ok: true })
+    expect(calls.map(call => call.method)).toEqual(['PUT'])
   })
 
   it('reports a race lost repeatedly rather than throwing', async () => {
@@ -925,6 +1059,77 @@ describe('PwsRemoteStore.declareBlindedIndexes', () => {
     })
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/meta read refused/)
+  })
+
+  it('reports the refusal of a Collection-scoped grant by name', async () => {
+    const store = PwsRemoteStore.fromGrants({
+      parsed: collectionScoped,
+      zcapClient,
+      collections: [{ key: 'notes', id: 'notes', indexes: ['author'] }],
+      keys: identityKeys
+    })
+    const calls = fakeCollectionHandle(store, {
+      declareIndexes: async () => {
+        throw new SpaceGrantRequiredError('refused: needs the Space URL', {
+          status: 404
+        })
+      }
+    })
+    const result = await store.declareBlindedIndexes('notes', {
+      encryption: withHmac
+    })
+    expect(result).toEqual({
+      collectionId: 'notes',
+      ok: false,
+      status: 404,
+      error: 'refused: needs the Space URL',
+      errorName: 'SpaceGrantRequiredError'
+    })
+    expect(calls.declareCalls).toBe(1)
+  })
+
+  it('reads the error name off another copy of the package', async () => {
+    // A duplicated pws-client gives the thrower a different class object, so
+    // the name is all that identifies the refusal.
+    const store = PwsRemoteStore.fromGrants({
+      parsed,
+      zcapClient,
+      collections: [{ key: 'notes', id: 'notes', indexes: ['author'] }],
+      keys: identityKeys
+    })
+    fakeCollectionHandle(store, {
+      declareIndexes: async () => {
+        throw Object.assign(new Error('refused'), {
+          name: 'SpaceGrantRequiredError',
+          status: 404
+        })
+      }
+    })
+    const result = await store.declareBlindedIndexes('notes', {
+      encryption: withHmac
+    })
+    expect(result.errorName).toBe('SpaceGrantRequiredError')
+  })
+
+  it('reads the schema first and skips with no write once it is declared', async () => {
+    // The goal-state check runs before any write, so a Collection-scoped
+    // grant whose indexes the wallet already declared draws no refusal.
+    const store = PwsRemoteStore.fromGrants({
+      parsed: collectionScoped,
+      zcapClient,
+      collections: [{ key: 'notes', id: 'notes', indexes: ['author'] }],
+      keys: identityKeys
+    })
+    const calls = fakeCollectionHandle(store, {
+      indexes: async () => [{ attribute: 'content.author' }],
+      declareIndexes: async () => {
+        throw new SpaceGrantRequiredError('refused', { status: 404 })
+      }
+    })
+    expect(
+      await store.declareBlindedIndexes('notes', { encryption: withHmac })
+    ).toEqual({ collectionId: 'notes', ok: true, wrote: false })
+    expect(calls.declareCalls).toBe(0)
   })
 
   it('reports a missing capability and missing identity keys', async () => {

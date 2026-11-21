@@ -17,21 +17,24 @@
  *   ({@link PwsRemoteStore.readCollectionMeta}): the `encryption` descriptor,
  *   the `plaintext` declaration, and the opaque `custom` envelope arrive as one
  *   object under one validator, so every consumer here reads it once;
- * - two best-effort declarations written back onto that object, each a merge
- *   into the object the caller read (`Collection.configure`, which carries
- *   every other member forward and rebases on a lost race; under PWS v0.5 the
- *   `PUT` at `meta` is a full replacement, so a partial body would clear the
- *   members the caller never read): the `{ scheme: 'edv' }` encryption
- *   descriptor on a private
- *   collection that carries none (whether a delegated collection-scoped RW
- *   zcap authorizes the write is the server's call; non-fatal either way, since
- *   envelopes replicate into an unmarked collection just the same, and a
- *   PUBLIC collection is never marked because public implies plaintext), and
- *   the `plaintext.indexes` list on a public one;
- * - the blinded-index schema write for private ones
- *   ({@link PwsRemoteStore.declareBlindedIndexes}) -- plus the equality query
- *   verb itself ({@link PwsRemoteStore.queryCollectionByEquality}), which
- *   routes on the collection's visibility: the canonical sorted
+ * - two best-effort declarations onto that object: the `plaintext.indexes`
+ *   list on a public collection, a merge into the object the caller read
+ *   (`Collection.configure`, which carries every other member forward and
+ *   rebases on a lost race; under PWS v0.5 the `PUT` at `meta` is a full
+ *   replacement, so a partial body would clear the members the caller never
+ *   read), and the blinded-index schema inside a private collection's
+ *   encrypted `custom` envelope
+ *   ({@link PwsRemoteStore.declareBlindedIndexes}). Both are Collection
+ *   Metadata writes, which the server admits only under a root invocation or
+ *   a grant on the Space URL. The app holds Collection-scoped grants, so
+ *   under them pws-client refuses the write before it is sent
+ *   (`SpaceGrantRequiredError`), and the result reports that name. A login
+ *   only ever yields Collection-scoped grants, so in a session the Space
+ *   controller (the wallet) is the one that declares. A returning session
+ *   whose indexes are already declared finds the goal state and writes
+ *   nothing;
+ * - the equality query verb ({@link PwsRemoteStore.queryCollectionByEquality}),
+ *   which routes on the collection's visibility: the canonical sorted
  *   `filter[attr]=value` GET for a public collection, the client-blinded
  *   `blinded-index` query for a private one, both parsed into the same
  *   `{ documents, hasMore, cursor? }` page shape.
@@ -65,8 +68,16 @@ import type { ParsedGrants } from '../grants.js'
 import { createSpaceTrust, type SpaceTrust } from './spaceTrust.js'
 
 /**
- * The outcome of a best-effort declaration write (the encryption descriptor,
- * the public `indexes` list, or the blinded-index schema), for diagnostics.
+ * The `name` pws-client gives a Collection Metadata write it refuses because
+ * the handle's capability does not target the Space URL. Matched as a string
+ * on {@link DeclarationResult.errorName}, so an error from another copy of
+ * the package matches too.
+ */
+export const SPACE_GRANT_REQUIRED = 'SpaceGrantRequiredError'
+
+/**
+ * The outcome of a best-effort declaration write (the public `indexes` list,
+ * or the blinded-index schema), for diagnostics.
  */
 export interface DeclarationResult {
   collectionId: string
@@ -74,11 +85,19 @@ export interface DeclarationResult {
   status?: number
   error?: string
   /**
+   * The caught error's `name`, when a write was attempted and failed. A
+   * caller tells refusals apart by it. `SpaceGrantRequiredError` means the
+   * app's Collection-scoped grant cannot write Collection Metadata: the write
+   * was refused before it was sent, and the Space controller has to make
+   * it. Match it against `SPACE_GRANT_REQUIRED`. A plain `NotFoundError`
+   * means the Collection is absent or not visible to this grant.
+   */
+  errorName?: string
+  /**
    * True when no write was attempted -- the declaration does not apply to this
-   * collection at all (e.g. the encryption descriptor on a public collection),
-   * or it already carries an `encryption` block (e.g. an epoch roster the wallet
-   * provisioned at consent time, which a bare-descriptor write must never
-   * clobber). Reported as `ok` since the goal state holds either way.
+   * collection at all (e.g. the public `indexes` list on a private
+   * collection), or the stored object already says what the configured list
+   * says. Reported as `ok` since the goal state holds either way.
    */
   skipped?: boolean
   /**
@@ -130,7 +149,7 @@ type CollectionRouting = {
  * @param name {string}   the attribute name as declared in the collection config
  * @returns {string}
  */
-function blindedAttribute(name: string): string {
+export function blindedAttribute(name: string): string {
   return `content.${name}`
 }
 
@@ -181,34 +200,45 @@ type DeclaredIndex = NonNullable<
 >[number]
 
 /**
- * Whether a stored `plaintext.indexes` declaration already says what the
- * configured list says, compared in the server's normalized shape (a bare
- * string is `{ name, source: 'content', unique: false }`) and in order.
+ * The `plaintext.indexes` list that adds the configured entries a stored
+ * declaration lacks, or `undefined` when it lacks none. Entries are compared
+ * in the server's normalized shape (a bare string is
+ * `{ name, source: 'content', unique: false }`), in any order. The stored
+ * list may hold more than the configured one, since the Space controller
+ * declares for every reader of the collection. Its other entries are kept. A
+ * stored entry of the same name as a missing one is replaced by it.
  *
  * @param stored {DeclaredIndex[]}   the declaration read from the object
  * @param configured {DeclaredIndex[]}   the configured list
- * @returns {boolean}
+ * @returns {DeclaredIndex[] | undefined}
  */
-function sameIndexDeclaration(
+function withMissingIndexes(
   stored: DeclaredIndex[],
   configured: DeclaredIndex[]
-): boolean {
+): DeclaredIndex[] | undefined {
+  const nameOf = (entry: DeclaredIndex): string =>
+    typeof entry === 'string' ? entry : entry.name
   const normalize = (entry: DeclaredIndex): string =>
     typeof entry === 'string'
       ? `${entry}\0content\0false`
       : `${entry.name}\0${entry.source ?? 'content'}\0${entry.unique === true}`
-  return (
-    stored.length === configured.length &&
-    stored.map(normalize).join('\n') === configured.map(normalize).join('\n')
-  )
+  const declared = new Set(stored.map(normalize))
+  const missing = configured.filter(entry => !declared.has(normalize(entry)))
+  if (missing.length === 0) {
+    return undefined
+  }
+  const replaced = new Set(missing.map(nameOf))
+  return [...stored.filter(entry => !replaced.has(nameOf(entry))), ...missing]
 }
 
 /**
  * Turns a caught declaration-write failure into a {@link DeclarationResult}:
- * the HTTP status when the mapped error carries one, and its message.
- * Shared by every declaration write's catch block -- the encryption
- * descriptor, the public `indexes` list, and the blinded-index schema --
- * so a refused or raced write is reported rather than thrown, uniformly.
+ * the HTTP status when the mapped error carries one, its message, and its
+ * `name`. Shared by every declaration write's catch block -- the public
+ * `indexes` list and the blinded-index schema -- so a refused or raced write
+ * is reported rather than thrown, uniformly. The `name` is read off the
+ * caught error itself rather than matched by class, so an error thrown by
+ * another copy of pws-client keeps it.
  *
  * @param collectionId {string}   the PWS collection id
  * @param err {unknown}   the caught error
@@ -220,11 +250,13 @@ function declarationFailure(
 ): DeclarationResult {
   const status = errorStatus(err)
   const message = errorMessage(err)
+  const name = (err as { name?: unknown } | null)?.name
   return {
     collectionId,
     ok: false,
     ...(status !== undefined && { status }),
-    error: message
+    error: message,
+    ...(typeof name === 'string' && { errorName: name })
   }
 }
 
@@ -525,20 +557,29 @@ export class PwsRemoteStore {
 
   /**
    * Best-effort declaration of a public collection's equality-indexed
-   * attributes (`{ plaintext: { indexes: [...] } }`) on its Metadata object,
-   * invoked with that collection's delegated RW zcap. The `plaintext` member
-   * is the counterpart of `encryption`. The server rejects
-   * `filter[attr]=value` queries on undeclared attributes fail-closed, so a
-   * public collection that wants `store.query()` must announce its `indexes`
-   * here. Non-fatal like the encryption descriptor: returns the outcome rather
-   * than throwing. Skipped (reported `ok` + `skipped`) for a private
-   * collection or one that declares no indexes.
+   * attributes (`{ plaintext: { indexes: [...] } }`) on its Metadata object.
+   * The `plaintext` member is the counterpart of `encryption`. The server
+   * rejects `filter[attr]=value` queries on undeclared attributes
+   * fail-closed, so a public collection that wants `store.query()` needs its
+   * `indexes` declared. Non-fatal: returns the outcome rather than throwing.
+   * Skipped (reported `ok` + `skipped`) for a private collection or one that
+   * declares no indexes.
    *
-   * A stored declaration that already matches the configured list is skipped
-   * too, so a returning session writes nothing. The comparison is over the
-   * server's normalized shape (a bare string entry is
+   * The write is a Collection Metadata write, which the server admits only
+   * under a root invocation or a grant on the Space URL. It is invoked with
+   * the collection's delegated zcap, and the app's grants are
+   * Collection-scoped, so pws-client refuses it before it is sent. The result
+   * is then NOT ok, with `errorName: 'SpaceGrantRequiredError'`. The Space
+   * controller (the wallet) makes the declaration, and this method then finds
+   * it in place.
+   *
+   * A stored declaration that already holds every configured index is skipped
+   * too, so a returning session writes nothing and draws no refusal. The
+   * stored list may hold more entries, in any order. The comparison is over
+   * the server's normalized shape (a bare string entry is
    * `{ name, source: 'content', unique: false }`), so the server echoing an
-   * expanded entry is not read as drift.
+   * expanded entry is not read as drift. A write adds the missing entries and
+   * keeps the others.
    *
    * The write is a merge into the object the caller already read
    * (`Collection.configure`): the stored `plaintext` object is sent back with its `indexes`
@@ -573,10 +614,10 @@ export class PwsRemoteStore {
     const { indexes } = config
     return await this.#configure(collectionId, {
       current,
-      change: ({ description: { plaintext } }) =>
-        plaintext?.indexes && sameIndexDeclaration(plaintext.indexes, indexes)
-          ? undefined
-          : { plaintext: { ...plaintext, indexes } }
+      change: ({ description: { plaintext } }) => {
+        const merged = withMissingIndexes(plaintext?.indexes ?? [], indexes)
+        return merged && { plaintext: { ...plaintext, indexes: merged } }
+      }
     })
   }
 
@@ -595,6 +636,14 @@ export class PwsRemoteStore {
    * like the other declarations: returns the outcome rather than throwing.
    * Skipped (reported `ok` + `skipped`) for a public collection or one that
    * declares no indexes.
+   *
+   * The schema is read first (`Collection.indexes()`, a read the grant
+   * covers), so the goal-state check runs before any write. The write itself
+   * is a Collection Metadata write, which the server admits only under a root
+   * invocation or a grant on the Space URL. Under the app's Collection-scoped
+   * grant pws-client refuses it before it is sent, and the result is NOT ok,
+   * with `errorName: 'SpaceGrantRequiredError'`. The Space controller (the
+   * wallet) makes the declaration.
    *
    * A collection whose descriptor carries no `hmac` member is reported NOT ok
    * (rather than skipped): the blinding key is installed with the collection's

@@ -6,7 +6,7 @@
  * collection in another owner's Space.
  *
  * An audience is one plaintext collection in its owner's Space, and membership
- * is a GET and HEAD zcap on that collection's container. A subscriber holds
+ * is a GET zcap on that collection's container. A subscriber holds
  * one reader per audience and merges what the readers return by the app's own
  * stable post id, which lives in the post body; the resource id is not a
  * stable identity, since a post that changes audience moves.
@@ -18,7 +18,7 @@
  * delegation chain is rooted in (`spaceUrlOf`), with nothing above it.
  *
  * `pull()` follows the collection's `changes` feed through the read-only GET
- * form of the query endpoint, which is what a GET and HEAD grant reaches,
+ * form of the query endpoint, which is what a GET grant reaches,
  * keeping a checkpoint per audience and skipping every entry whose `kind` is
  * not `resource`. A server that refuses the GET form (405) or has no feed at
  * all (501) is read through the listing and one GET per resource instead;
@@ -162,7 +162,7 @@ export class AudienceReader {
    * the first request is the first `pull()`.
    *
    * @param options {object}
-   * @param options.zcap {IZcap}   the GET and HEAD zcap on the audience's
+   * @param options.zcap {IZcap}   the GET zcap on the audience's
    *   container; its chain must root in a Space, its `invocationTarget` must
    *   name a collection of that Space, and its `allowedAction` must include
    *   `GET`

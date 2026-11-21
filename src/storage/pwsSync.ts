@@ -5,13 +5,16 @@
  * Shared PWS replication bootstrap: given a parsed grant set and the invoking
  * ZcapClient, builds the delegated {@link PwsRemoteStore}, acquires each
  * granted private collection's descriptor through the store's governed source,
- * best-effort declares each collection's equality indexes -- as the Metadata
- * object's plaintext `plaintext.indexes` member for a public one, inside its
- * encrypted `custom` envelope (as blinded-index attributes) for a private one
- * -- and starts the supplied {@link SyncController} with reactive store patching. The
- * caller injects the opened localStore, the controller, and the per-doc
- * `onRemoteChange` patcher (typically wired to the rehydrate mechanism over the
- * app's store registry) rather than this module reaching for app-side globals.
+ * checks each collection's equality indexes -- the Metadata object's
+ * plaintext `plaintext.indexes` member for a public one, blinded-index
+ * attributes inside its encrypted `custom` envelope for a private one --
+ * and starts the supplied {@link SyncController} with reactive store patching.
+ * The app's Collection-scoped grants cannot declare indexes, so missing ones
+ * draw a warning that the Space controller (the wallet) has to (see
+ * {@link PwsRemoteStore}). The caller injects the opened localStore, the
+ * controller, and the per-doc `onRemoteChange` patcher (typically wired to the
+ * rehydrate mechanism over the app's store registry) rather than this module
+ * reaching for app-side globals.
  *
  * SHARED collections are handled apart from all of that. They belong to the
  * wallet, so they never enter replication, never get a local replica, and are
@@ -34,7 +37,12 @@ import {
   type PwsCollectionConfig
 } from '../config.js'
 import type { ParsedGrants } from '../grants.js'
-import { PwsRemoteStore, type CollectionMetaRead } from './pwsRemoteStore.js'
+import {
+  PwsRemoteStore,
+  SPACE_GRANT_REQUIRED,
+  type CollectionMetaRead,
+  type DeclarationResult
+} from './pwsRemoteStore.js'
 import type { SpaceTrust } from './spaceTrust.js'
 import { SharedCollectionReader } from './sharedCollectionReader.js'
 import { acquireGovernedDescriptor } from './governedDescriptors.js'
@@ -177,6 +185,36 @@ async function readGrantedEncryption({
     })
   )
   return { descriptors, failures }
+}
+
+/**
+ * Warns about one declaration that did not land. A refusal by name
+ * (`SpaceGrantRequiredError`, the grant is too narrow for a Collection
+ * Metadata write) gets its own message, apart from the generic one.
+ *
+ * @param options {object}
+ * @param options.result {DeclarationResult}   the declaration's NOT ok outcome
+ * @param options.what {string}   the declaration's name, opening the warning
+ */
+function warnDeclaration({
+  result,
+  what
+}: {
+  result: DeclarationResult
+  what: 'Blinded-index' | 'Indexes'
+}): void {
+  const message =
+    result.errorName === SPACE_GRANT_REQUIRED
+      ? `${what} declaration refused: this app holds a Collection grant, ` +
+        'which cannot declare indexes. The Space controller (the wallet) ' +
+        'has to declare them.'
+      : `${what} declaration failed.`
+  log.warn(message, {
+    collectionId: result.collectionId,
+    status: result.status ?? 'n/a',
+    error: result.error ?? 'unknown error',
+    ...(result.errorName !== undefined && { errorName: result.errorName })
+  })
 }
 
 /**
@@ -335,7 +373,10 @@ export async function startPwsSync({
   //   object is replaced whole and a partial body would clear the members
   //   this app never touched. Non-fatal (a query against undeclared indexes
   //   fails with a descriptive 400), and skipped (reported ok + skipped) for
-  //   a private collection or a public one with no declared indexes;
+  //   a private collection, a public one with no declared indexes, or one
+  //   whose stored list already matches. Under the app's Collection grant
+  //   the write itself is refused (`SpaceGrantRequiredError`), since only
+  //   the Space controller writes Collection Metadata;
   // - the private collection's cipher rebuild, when the acquired descriptor's
   //   epoch roster differs from what the local store opened with (a
   //   wallet-side rotation, or first-ever epochs), with the fresh set handed
@@ -358,7 +399,10 @@ export async function startPwsSync({
   // descriptor skips the pass's read, so the install reads then too.
   //
   // The blinded-index declaration is the one write a private collection
-  // takes here, and it reads the object fresh for its own compare-and-swap.
+  // attempts here, and it reads the schema fresh before deciding to write.
+  // Under the app's Collection grant that write is refused
+  // (`SpaceGrantRequiredError`). A session's grants are all
+  // Collection-scoped, so the wallet has to have declared the indexes.
   //
   // SHARED collections never appear here: they are wallet-owned, absent from
   // the app-owned registry, and a read-only grant would draw nothing but a
@@ -394,11 +438,7 @@ export async function startPwsSync({
           encryption
         })
         if (!blinded.ok) {
-          log.warn('Blinded-index declaration failed.', {
-            collectionId,
-            error: blinded.error ?? 'unknown error',
-            status: blinded.status ?? 'n/a'
-          })
+          warnDeclaration({ result: blinded, what: 'Blinded-index' })
         }
         // The schema the declaration just settled is then installed on this
         // collection's local cipher, so the documents this replica writes from
@@ -434,11 +474,7 @@ export async function startPwsSync({
         ...(current && { current })
       })
       if (!indexes.ok) {
-        log.warn('Indexes declaration write not authorized.', {
-          collectionId,
-          status: indexes.status ?? 'n/a',
-          error: indexes.error ?? 'unknown error'
-        })
+        warnDeclaration({ result: indexes, what: 'Indexes' })
       }
     }
   })

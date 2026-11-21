@@ -24,8 +24,7 @@
 import type { PwsClient } from '@interop/pws-client'
 import { createPwsSyncPort as createClientSyncPort } from '@interop/pws-client/sync'
 import type { IZcap } from '@interop/data-integrity-core'
-// pws-sync still exports this type under its former prefix.
-import type { WasSyncBasePort as PwsSyncBasePort } from '@interop/pws-sync'
+import type { PwsSyncBasePort } from '@interop/pws-sync'
 
 /**
  * Builds a `PwsSyncBasePort` bound to a single Space + Collection on the remote

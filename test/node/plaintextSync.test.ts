@@ -9,6 +9,11 @@
  * (the public payload verbatim; an EDV envelope for the private one), and
  * pulls both back down into a second, fresh replica.
  *
+ * The public collection's equality indexes are declared by the Space
+ * controller, the stand-in for the wallet. The app's Collection-scoped grant
+ * cannot write Collection Metadata, so its own attempt is refused by name,
+ * and its sync bootstrap finds the declaration in place and writes nothing.
+ *
  * @vitest-environment node
  */
 import 'fake-indexeddb/auto'
@@ -28,9 +33,15 @@ import { StorageContext } from '../../src/storage/storageContext.js'
 import { startPwsSync } from '../../src/storage/pwsSync.js'
 import { SyncController } from '../../src/storage/syncController.js'
 import { createSyncStatusStore } from '../../src/storage/syncStatusStore.js'
-import type { PwsRemoteStore } from '../../src/storage/pwsRemoteStore.js'
+import {
+  PwsRemoteStore,
+  type CollectionMetaRead,
+  type DeclarationResult
+} from '../../src/storage/pwsRemoteStore.js'
 import type { ZcapClient } from '@interop/ezcap'
 import type { PwsCollectionConfig } from '../../src/config.js'
+import { withCapturedLogs } from '../fixtures/capturedLogs.js'
+import { devSpaceOwner } from '../fixtures/devSpaceOwner.js'
 
 // The SyncController wires an `online` listener on `window`; Node has no
 // window, so give it an inert stand-in.
@@ -98,6 +109,15 @@ const controllers: SyncController[] = []
 const statusStores: ReturnType<typeof createSyncStatusStore>[] = []
 const stores: LocalStore[] = []
 let remoteStore: PwsRemoteStore
+// The warnings every sync bootstrap logged.
+const bootstrapWarnings: string[] = []
+// The app's own declaration attempt before the wallet declared, and the
+// Metadata object on either side of it.
+let refused: DeclarationResult
+let beforeRefusal: CollectionMetaRead | undefined
+let afterRefusal: CollectionMetaRead | undefined
+// The Metadata object's validator once the wallet's declaration landed.
+let declaredEtag: string | undefined
 
 // Written by the push test, read back by the pull test.
 const post = makeDoc('A world-readable post')
@@ -122,6 +142,30 @@ beforeAll(async () => {
   })
   parsed = parseGrants(provisioned.grants)
   ;({ zcapClient } = await deriveIdentity({ seed: SEED }))
+
+  // The app's own attempt, under its Collection grant, while nothing is
+  // declared yet.
+  const appStore = PwsRemoteStore.fromGrants({
+    parsed,
+    zcapClient,
+    collections: REGISTRY
+  })
+  beforeRefusal = await appStore.readCollectionMeta(PUBLIC_ID)
+  refused = await appStore.declareCollectionIndexes(PUBLIC_ID, {
+    ...(beforeRefusal && { current: beforeRefusal })
+  })
+  afterRefusal = await appStore.readCollectionMeta(PUBLIC_ID)
+
+  // The wallet's declaration: the Space controller invokes as root.
+  const owner = await devSpaceOwner({
+    baseServerUrl,
+    did: provisioned.provisionerDid
+  })
+  await owner
+    .spaceAt(provisioned.spaceUrl)
+    .collection(PUBLIC_ID)
+    .configure({ plaintext: { indexes: ['title'] } })
+  declaredEtag = (await appStore.readCollectionMeta(PUBLIC_ID))?.etag
 }, 60000)
 
 afterAll(async () => {
@@ -155,14 +199,20 @@ async function openSyncedReplica(dbName: string): Promise<LocalStore> {
     sync: { pollMs: 500, retryMs: 500 }
   })
   controllers.push(controller)
-  ;({ remoteStore } = await startPwsSync({
-    parsed,
-    zcapClient,
-    collections: REGISTRY,
-    localStore: store,
-    syncController: controller,
-    onRemoteChange: () => {}
-  }))
+  const { result, events } = await withCapturedLogs(() =>
+    startPwsSync({
+      parsed,
+      zcapClient,
+      collections: REGISTRY,
+      localStore: store,
+      syncController: controller,
+      onRemoteChange: () => {}
+    })
+  )
+  ;({ remoteStore } = result)
+  bootstrapWarnings.push(
+    ...events.filter(event => event.level === 'warn').map(event => event.msg)
+  )
   return store
 }
 
@@ -200,15 +250,33 @@ describe('plaintext-collection sync against web-spaces-server', () => {
     expect(JSON.stringify(privateBody)).not.toContain('secret-note-marker')
   }, 60000)
 
-  it('leaves the public collection unmarked and declares its indexes', async () => {
+  it('refuses the app its own index declaration by name, writing nothing', async () => {
+    expect(refused).toMatchObject({
+      collectionId: PUBLIC_ID,
+      ok: false,
+      status: 404,
+      errorName: 'SpaceGrantRequiredError'
+    })
+    // No Metadata write landed: the object kept its validator and declares
+    // no indexes.
+    expect(beforeRefusal?.etag).toBeDefined()
+    expect(afterRefusal?.etag).toBe(beforeRefusal?.etag)
+    expect(afterRefusal?.description.plaintext?.indexes).toBeUndefined()
+  }, 60000)
+
+  it('leaves the public collection unmarked and finds the wallet-declared indexes', async () => {
     // The Metadata object, read the way the bootstrap reads it.
     const read = await remoteStore.readCollectionMeta(PUBLIC_ID)
     expect(read).toBeDefined()
     expect(read!.description.encryption).toBeUndefined()
-    // The sync bootstrap announced the registry's equality indexes, writing
-    // the object back whole under its validator.
+    // The Space controller declared the registry's equality indexes. The sync
+    // bootstrap found them in place: it wrote nothing, so the validator is
+    // the one the wallet's write left, and it warned about nothing.
     expect(read!.description.plaintext?.indexes).toEqual(['title'])
-    expect(read!.etag).toBeDefined()
+    expect(read!.etag).toBe(declaredEtag)
+    expect(
+      bootstrapWarnings.filter(message => message.includes('declaration'))
+    ).toEqual([])
   }, 60000)
 
   it('answers an equality query over the GET filter', async () => {

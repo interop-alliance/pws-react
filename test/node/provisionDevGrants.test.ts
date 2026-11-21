@@ -16,12 +16,14 @@ import {
 } from '@interop/web-spaces-server/testing'
 import { CapabilityAgent } from '@interop/capability-agent'
 import { PwsClient } from '@interop/pws-client'
+import { createEdvEncryption } from '@interop/pws-client/edv'
 import { webvhZcapClient } from '@interop/wallet-core/webvh'
 import {
   DEFAULT_PROVISIONER_SEED,
   DEV_GRANT_TTL_MS,
   provisionDevGrants
 } from '../../src/dev/provisionDevGrants.js'
+import { deriveIdentity } from '../../src/identity/agents.js'
 
 const SEED = new Uint8Array(32).map((_, index) => (index * 7 + 3) & 0xff)
 
@@ -104,6 +106,32 @@ describe('provisionDevGrants', () => {
     // ezcap serializes without milliseconds, hence the second of slack.
     expect(expires).toBeGreaterThanOrEqual(before + DEV_GRANT_TTL_MS - 1000)
     expect(expires).toBeLessThanOrEqual(Date.now() + DEV_GRANT_TTL_MS)
+  })
+
+  it('declares the indexes it is given, as the Space controller', async () => {
+    const provisioned = await provisionDevGrants({
+      baseServerUrl: server!.baseServerUrl,
+      seed: SEED,
+      collections: [
+        { id: 'posts', visibility: 'public', indexes: ['title'] },
+        { id: 'notes', blindedIndex: true, indexes: ['title'] }
+      ]
+    })
+    const identity = await deriveIdentity({ seed: SEED })
+    const app = new PwsClient({
+      baseServerUrl: server!.baseServerUrl,
+      zcapClient: identity.zcapClient,
+      encryption: createEdvEncryption({ resolveKeys: async () => identity })
+    })
+    const space = app.spaceAt(provisioned.spaceUrl)
+    const [posts, notes] = provisioned.grants
+    const description = await space
+      .collection('posts', { capability: posts! })
+      .describe()
+    expect(description?.plaintext?.indexes).toEqual(['title'])
+    expect(
+      await space.collection('notes', { capability: notes! }).indexes()
+    ).toEqual([expect.objectContaining({ attribute: 'content.title' })])
   })
 
   it('honors a caller-supplied expiry', async () => {

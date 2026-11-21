@@ -41,8 +41,7 @@ import {
   makeLwwConflictHandler,
   type Json,
   type SyncedDoc,
-  // pws-sync still exports this type under its former prefix.
-  type WasSyncPort as PwsSyncPort
+  type PwsReplicationPort
 } from '@interop/pws-sync'
 import type { WriteAck } from '@interop/pws-client/sync'
 import {
@@ -87,7 +86,7 @@ interface Sealed {
 let server: Awaited<ReturnType<typeof startTestServer>> | undefined
 let remoteStore: PwsRemoteStore
 let cipher: DocCipher
-let port: PwsSyncPort
+let port: PwsReplicationPort
 
 beforeAll(async () => {
   // The server owns the temp backend, so closing it removes the data dir.

@@ -92,7 +92,7 @@ function grantFor({
   collectionId,
   controller = appDid,
   expires = new Date(Date.now() + 86_400_000).toISOString(),
-  actions = ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+  actions = ['GET', 'PUT', 'POST', 'DELETE'],
   spaceUrl = SPACE_URL
 }: {
   collectionId?: string
@@ -485,7 +485,7 @@ describe('checkGrants', () => {
 
   it('rejects a collection grant with insufficient actions', () => {
     const grants = fullGrantSet()
-    ;(grants[0] as { allowedAction: string[] }).allowedAction = ['GET', 'HEAD']
+    ;(grants[0] as { allowedAction: string[] }).allowedAction = ['GET']
     expect(() =>
       checkGrants({
         grants,
@@ -501,7 +501,7 @@ describe('checkGrants', () => {
     const grants = [
       grantFor({
         collectionId: 'posts',
-        actions: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
+        actions: ['GET', 'POST', 'PUT', 'DELETE']
       })
     ]
     const checked = checkGrants({
@@ -514,7 +514,7 @@ describe('checkGrants', () => {
 
   it('rejects a public-collection grant missing a required write action', () => {
     const grants = [
-      grantFor({ collectionId: 'posts', actions: ['GET', 'HEAD', 'POST'] })
+      grantFor({ collectionId: 'posts', actions: ['GET', 'POST'] })
     ]
     expect(() =>
       checkGrants({
@@ -529,14 +529,14 @@ describe('checkGrants', () => {
     // The requirement is the app's own; a narrower one is met by the narrower
     // grant a wallet returned for it.
     const grants = [
-      grantFor({ collectionId: 'posts', actions: ['GET', 'HEAD', 'POST'] })
+      grantFor({ collectionId: 'posts', actions: ['GET', 'POST'] })
     ]
     expect(() =>
       checkGrants({
         grants,
         controllerDid: appDid,
         collections: [{ id: 'posts', visibility: 'public' }],
-        requiredActions: ['GET', 'HEAD', 'POST']
+        requiredActions: ['GET', 'POST']
       })
     ).not.toThrow()
   })

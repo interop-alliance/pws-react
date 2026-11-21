@@ -168,7 +168,7 @@ export class SyncController {
     }
     this.#core = createSyncController({
       port: {
-        wasClient: remoteStore.pws,
+        pwsClient: remoteStore.pws,
         spaceUrl: remoteStore.spaceUrl,
         collections: covered,
         rxCollection: key => localStore.rxCollection(key),

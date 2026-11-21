@@ -4,7 +4,7 @@
 /**
  * `AudienceReader` against a real in-process web-spaces-server: an owner
  * provisions a plaintext audience collection in its own Space, delegates a
- * GET and HEAD zcap on it to a subscriber, and the subscriber's reader follows
+ * GET zcap on it to a subscriber, and the subscriber's reader follows
  * the collection's `changes` feed through the GET form, falls back to the
  * listing when the feed is refused, and pauses and resumes across a cut.
  *
@@ -28,7 +28,6 @@ import {
 } from '@interop/web-spaces-server/testing'
 import {
   PwsClient,
-  type ActionInput,
   type Collection,
   type IDelegatedZcap,
   type ISigner,
@@ -40,12 +39,11 @@ import {
   rootCapabilityId
 } from '@interop/pws-client/paths'
 import { CapabilityAgent } from '@interop/capability-agent'
-import { captureLogger } from '@interop/logger'
 import { provisionDevGrants } from '../../src/dev/provisionDevGrants.js'
 import { deriveIdentity } from '../../src/identity/agents.js'
 import { parseGrants } from '../../src/grants.js'
 import { AudienceReader } from '../../src/storage/audienceReader.js'
-import { setLogger } from '../../src/log.js'
+import { withCapturedLogs } from '../fixtures/capturedLogs.js'
 
 function testSeed(step: number, offset: number): Uint8Array {
   return new Uint8Array(32).map((_, index) => (index * step + offset) & 0xff)
@@ -116,7 +114,7 @@ afterEach(() => {
 
 /**
  * Creates a fresh plaintext audience collection in the owner's Space and
- * delegates a GET and HEAD zcap on it to the subscriber.
+ * delegates a GET zcap on it to the subscriber.
  */
 async function provisionAudience(): Promise<{
   collection: Collection
@@ -136,29 +134,11 @@ async function provisionAudience(): Promise<{
   const grant = () =>
     owner.grant({
       to: subscriberDid,
-      // The server accepts HEAD even though storage-core's ActionInput union
-      // omits it, hence the assertion.
-      actions: ['GET', 'HEAD'] as ActionInput[],
+      actions: ['GET'],
       target,
       capability: spaceRoot
     })
   return { collection, collectionId, target, grant }
-}
-
-/**
- * Runs `run` with the library's logger captured, restoring the previous one
- * afterwards.
- */
-async function withCapturedLogs<T>(
-  run: () => Promise<T>
-): Promise<{ result: T; events: ReturnType<typeof captureLogger>['events'] }> {
-  const capture = captureLogger('pr')
-  const previous = setLogger(capture.logger)
-  try {
-    return { result: await run(), events: capture.events }
-  } finally {
-    setLogger(previous)
-  }
 }
 
 /**
@@ -516,12 +496,12 @@ describe('AudienceReader cut and resume', () => {
   it('refuses a zcap that does not allow GET', async () => {
     const { grant } = await provisionAudience()
     const zcap = await grant()
-    const headOnly = { ...zcap, allowedAction: ['HEAD'] }
-    expect(() => AudienceReader.open({ zcap: headOnly, signer })).toThrow(
+    const noGet = { ...zcap, allowedAction: ['PUT'] }
+    expect(() => AudienceReader.open({ zcap: noGet, signer })).toThrow(
       /must allow GET/
     )
     const reader = AudienceReader.open({ zcap, signer })
-    expect(() => reader.replaceCapability({ zcap: headOnly })).toThrow(
+    expect(() => reader.replaceCapability({ zcap: noGet })).toThrow(
       /must allow GET/
     )
     expect(reader.paused).toBe(false)

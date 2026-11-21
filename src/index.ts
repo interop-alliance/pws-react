@@ -158,6 +158,7 @@ export { getWriterId, clearPersistedWriterId } from './storage/writerId.js'
 export { createEntityStore, type EntityStore } from './storage/entityStore.js'
 export {
   PwsRemoteStore,
+  SPACE_GRANT_REQUIRED,
   type DeclarationResult,
   type EqualityQueryPage
 } from './storage/pwsRemoteStore.js'

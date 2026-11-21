@@ -4,11 +4,16 @@
 /**
  * End-to-end blinded-index query against a real in-process web-spaces-server
  * (the published npm package): provisions a dev Space with a PRIVATE
- * (encrypted) collection carrying a blinded-index key, lets the sync bootstrap
- * declare the registry's index attributes into the collection's encrypted
- * metadata, writes documents through the index-aware codec path, and queries
- * them back through the `blinded-index` profile -- both directly on the remote
- * store and through the app-facing entity-store verb.
+ * (encrypted) collection carrying a blinded-index key, has the Space
+ * controller (the stand-in for the wallet) declare the registry's index
+ * attributes into the collection's encrypted metadata, writes documents
+ * through the index-aware codec path, and queries them back through the
+ * `blinded-index` profile -- both directly on the remote store and through
+ * the app-facing entity-store verb.
+ *
+ * The app's Collection-scoped grant cannot write Collection Metadata, so its
+ * own declaration attempt is refused by name, and its sync bootstrap finds
+ * the schema in place and writes nothing.
  *
  * @vitest-environment node
  */
@@ -28,7 +33,11 @@ import { StorageContext } from '../../src/storage/storageContext.js'
 import { startPwsSync } from '../../src/storage/pwsSync.js'
 import { SyncController } from '../../src/storage/syncController.js'
 import { createSyncStatusStore } from '../../src/storage/syncStatusStore.js'
-import { PwsRemoteStore } from '../../src/storage/pwsRemoteStore.js'
+import {
+  PwsRemoteStore,
+  type CollectionMetaRead,
+  type DeclarationResult
+} from '../../src/storage/pwsRemoteStore.js'
 import type { ZcapClient } from '@interop/ezcap'
 import type {
   IKeyAgreementKey,
@@ -37,6 +46,8 @@ import type {
 import type { PwsCollectionConfig } from '../../src/config.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../../src/log.js'
+import { withCapturedLogs } from '../fixtures/capturedLogs.js'
+import { devSpaceOwner } from '../fixtures/devSpaceOwner.js'
 
 // The SyncController wires an `online` listener on `window`; Node has no
 // window, so give it an inert stand-in.
@@ -89,6 +100,15 @@ let identityKeys: {
 let localStore: LocalStore
 let syncController: SyncController
 let remoteStore: PwsRemoteStore
+// The app's own declaration attempt before the wallet declared, the Metadata
+// object and the schema on either side of it, and the warnings the main
+// bootstrap logged.
+let refused: DeclarationResult
+let beforeRefusal: CollectionMetaRead | undefined
+let afterRefusal: CollectionMetaRead | undefined
+let schemaAfterRefusal: unknown[]
+let declaredEtag: string | undefined
+let bootstrapWarnings: string[]
 
 // Two notes share a title (for paging); the third is the negative control.
 const matching = [makeNote(SHARED_TITLE), makeNote(SHARED_TITLE)]
@@ -144,17 +164,58 @@ beforeAll(async () => {
     syncStatus: createSyncStatusStore(),
     sync: { pollMs: 500, retryMs: 500 }
   })
-  // The bootstrap is what declares the registry's index attributes into the
-  // collection's encrypted metadata.
-  ;({ remoteStore } = await startPwsSync({
+
+  // The app's own attempt, under its Collection grant, while the schema is
+  // still empty.
+  const appStore = PwsRemoteStore.fromGrants({
     parsed,
     zcapClient,
     collections: REGISTRY,
-    localStore,
-    syncController,
-    onRemoteChange: () => {},
-    identityKeys
-  }))
+    keys: identityKeys
+  })
+  const encryption = await appStore.descriptorSource.collectionEncryption({
+    collectionId: PRIVATE_ID
+  })
+  beforeRefusal = await appStore.readCollectionMeta(PRIVATE_ID)
+  refused = await appStore.declareBlindedIndexes(PRIVATE_ID, { encryption })
+  afterRefusal = await appStore.readCollectionMeta(PRIVATE_ID)
+  schemaAfterRefusal = await appStore.pws
+    .spaceAt(appStore.spaceUrl)
+    .collection(PRIVATE_ID, {
+      capability: appStore.collectionCapability(PRIVATE_ID)
+    })
+    .indexes()
+
+  // The wallet's declaration: the Space controller invokes as root, sealing
+  // the schema to the collection's current epoch.
+  const owner = await devSpaceOwner({
+    baseServerUrl,
+    did: provisioned.provisionerDid,
+    keys: identityKeys
+  })
+  await owner
+    .spaceAt(provisioned.spaceUrl)
+    .collection(PRIVATE_ID)
+    .declareIndexes({ indexes: [{ attribute: 'content.title' }] })
+  declaredEtag = (await appStore.readCollectionMeta(PRIVATE_ID))?.etag
+
+  // The bootstrap finds the schema in place and installs it on the local
+  // cipher, with no declaration write of its own.
+  const { result, events } = await withCapturedLogs(() =>
+    startPwsSync({
+      parsed,
+      zcapClient,
+      collections: REGISTRY,
+      localStore,
+      syncController,
+      onRemoteChange: () => {},
+      identityKeys
+    })
+  )
+  ;({ remoteStore } = result)
+  bootstrapWarnings = events
+    .filter(event => event.level === 'warn')
+    .map(event => event.msg)
 }, 60000)
 
 afterAll(async () => {
@@ -164,14 +225,37 @@ afterAll(async () => {
 }, 60000)
 
 describe('blinded-index query against web-spaces-server', () => {
-  it('declares the registry attributes into the encrypted schema', async () => {
+  it('refuses the app its own schema declaration by name, writing nothing', async () => {
+    expect(refused).toMatchObject({
+      collectionId: PRIVATE_ID,
+      ok: false,
+      status: 404,
+      errorName: 'SpaceGrantRequiredError'
+    })
+    // No Metadata write landed: the object kept its validator and the schema
+    // stayed empty.
+    expect(beforeRefusal?.etag).toBeDefined()
+    expect(afterRefusal?.etag).toBe(beforeRefusal?.etag)
+    expect(schemaAfterRefusal).toEqual([])
+  }, 60000)
+
+  it('finds the wallet-declared attributes and writes nothing', async () => {
     // The schema is collection state, readable by any recipient. The attribute
     // is rooted at the EDV document's `content`, which for a JSON payload IS
     // the stored payload verbatim.
     const declared = await collectionHandle().indexes()
     expect(declared.map(entry => entry.attribute)).toEqual(['content.title'])
+    // The bootstrap found it in place: the validator is the one the wallet's
+    // write left, and no declaration warning was logged.
+    expect((await remoteStore.readCollectionMeta(PRIVATE_ID))?.etag).toBe(
+      declaredEtag
+    )
+    expect(
+      bootstrapWarnings.filter(message => message.includes('declaration'))
+    ).toEqual([])
 
-    // Re-declaring is a no-op: only missing attributes are written.
+    // Declaring again under the Collection grant is a no-op: the schema is
+    // read first, nothing is missing, and no write is attempted.
     const again = await remoteStore.declareBlindedIndexes(PRIVATE_ID, {
       encryption: await remoteStore.descriptorSource.collectionEncryption({
         collectionId: PRIVATE_ID

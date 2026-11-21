@@ -19,11 +19,16 @@ import type { PwsCollectionConfig } from '../config.js'
 import type { ParsedGrants } from '../grants.js'
 import type { LocalStore } from './localStore.js'
 import type { SyncController } from './syncController.js'
-import { PwsRemoteStore, type CollectionMetaRead } from './pwsRemoteStore.js'
+import {
+  PwsRemoteStore,
+  SPACE_GRANT_REQUIRED,
+  type CollectionMetaRead
+} from './pwsRemoteStore.js'
 import { fakeDescriptorSource } from '../../test/fixtures/descriptorSource.js'
 import { readRemoteDescriptors, startPwsSync } from './pwsSync.js'
 import { captureLogger } from '@interop/logger'
 import { setLogger } from '../log.js'
+import { withCapturedLogs } from '../../test/fixtures/capturedLogs.js'
 
 const collections: PwsCollectionConfig[] = [
   { key: 'notes', id: 'notes' },
@@ -435,5 +440,109 @@ describe('startPwsSync blinded-index schema install', () => {
       remote.declareCollectionIndexes.mock.calls.map(([id]) => id).sort()
     ).toEqual(['notes', 'tasks'])
     expect(syncController.start).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('startPwsSync declaration warnings', () => {
+  const blinded = {
+    ...descriptor,
+    hmac: { id: 'urn:hmac', type: 'Sha256HmacKey2019' }
+  } as unknown as CollectionEncryption
+
+  /**
+   * Runs the bootstrap with each declaration verb answering `outcome`, and
+   * hands back the warnings it logged.
+   */
+  async function warningsFor(outcome: {
+    ok: boolean
+    status?: number
+    error?: string
+    errorName?: string
+  }) {
+    const remote = stubRemoteStore({ notes: blinded, tasks: undefined })
+    remote.declareBlindedIndexes.mockImplementation(async collectionId => ({
+      collectionId,
+      wrote: false,
+      ...outcome
+    }))
+    remote.declareCollectionIndexes.mockImplementation(async collectionId => ({
+      collectionId,
+      skipped: false,
+      ...outcome
+    }))
+    const syncController = { start: vi.fn(async () => {}) }
+    const { events } = await withCapturedLogs(() =>
+      startPwsSync({
+        parsed,
+        zcapClient,
+        collections,
+        localStore: {
+          applyRemoteDescriptor: vi.fn(async () => {}),
+          applyCollectionMeta: vi.fn(async () => {}),
+          setDescriptorSource: vi.fn()
+        } as unknown as LocalStore,
+        syncController: syncController as unknown as SyncController,
+        onRemoteChange: () => {}
+      })
+    )
+    // Declarations are non-fatal: replication starts whatever they report.
+    expect(syncController.start).toHaveBeenCalledTimes(1)
+    return events.filter(event => event.level === 'warn')
+  }
+
+  it('says a Collection grant cannot declare indexes when the refusal is named', async () => {
+    const warnings = await warningsFor({
+      ok: false,
+      status: 404,
+      error: 'refused',
+      errorName: SPACE_GRANT_REQUIRED
+    })
+    const blindedWarning = warnings.find(event =>
+      event.msg.startsWith('Blinded-index declaration refused')
+    )
+    expect(blindedWarning?.msg).toMatch(/Collection grant/)
+    expect(blindedWarning?.msg).toMatch(/Space controller \(the wallet\)/)
+    expect(blindedWarning?.data).toMatchObject({
+      collectionId: 'notes',
+      status: 404,
+      errorName: SPACE_GRANT_REQUIRED
+    })
+    const indexesWarnings = warnings.filter(event =>
+      event.msg.startsWith('Indexes declaration refused')
+    )
+    expect(
+      indexesWarnings.map(event => event.data?.collectionId).sort()
+    ).toEqual(['notes', 'tasks'])
+    expect(indexesWarnings[0]?.msg).toMatch(/Space controller \(the wallet\)/)
+    expect(
+      warnings.some(event => event.msg.includes('declaration failed'))
+    ).toBe(false)
+  })
+
+  it('keeps the generic warnings for any other failure', async () => {
+    const warnings = await warningsFor({
+      ok: false,
+      status: 404,
+      error: 'not found',
+      errorName: 'NotFoundError'
+    })
+    expect(
+      warnings.filter(event =>
+        event.msg.startsWith('Blinded-index declaration failed.')
+      )
+    ).toHaveLength(2)
+    expect(
+      warnings.filter(event =>
+        event.msg.startsWith('Indexes declaration failed.')
+      )
+    ).toHaveLength(2)
+    expect(warnings.some(event => event.msg.includes('refused'))).toBe(false)
+  })
+
+  it('warns about nothing when the declarations found their goal state', async () => {
+    const warnings = await warningsFor({ ok: true })
+    expect(
+      warnings.filter(event => event.msg.includes('declaration'))
+    ).toHaveLength(0)
   })
 })

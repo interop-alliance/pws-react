@@ -65,14 +65,14 @@ import type {
  * classes, `https://w3id.org/byoe#private-collection` and
  * `https://w3id.org/byoe#public-collection`.
  */
-export const RW_ACTIONS = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
+export const RW_ACTIONS = ['GET', 'POST', 'PUT', 'DELETE']
 
 /**
  * The actions requested on a SHARED (wallet-owned) collection: read-only, and
  * not configurable. A shared collection belongs to the wallet, so an app never
  * asks to write it.
  */
-export const SHARED_ACTIONS = ['GET', 'HEAD']
+export const SHARED_ACTIONS = ['GET']
 
 /**
  * The allowed actions of the descriptor class a collection is requested with

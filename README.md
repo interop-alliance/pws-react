@@ -184,12 +184,12 @@ the same `key` or `id` in each is rejected at store open
 
 At login each shared collection is requested with the distinct
 `https://w3id.org/byoe#shared-wallet-collection` descriptor type and the
-read-only action set `SHARED_ACTIONS` (`GET`/`HEAD`) -- an app never asks to
-write a wallet collection. As with `https://w3id.org/byoe#public-collection`, a
-wallet that predates the type reports the request unsatisfiable and the feature
-fails closed, which is the point: a share fuses two axes -- the read zcap AND an
-entry in the collection's key-epoch roster -- and a wallet that granted only the
-zcap would hand the app ciphertext it cannot decrypt, surfacing as corrupt data
+read-only action set `SHARED_ACTIONS` (`GET`) -- an app never asks to write a
+wallet collection. As with `https://w3id.org/byoe#public-collection`, a wallet
+that predates the type reports the request unsatisfiable and the feature fails
+closed, which is the point: a share fuses two axes -- the read zcap AND an entry
+in the collection's key-epoch roster -- and a wallet that granted only the zcap
+would hand the app ciphertext it cannot decrypt, surfacing as corrupt data
 rather than as a wallet that needs updating.
 
 Decryption uses the app's **identity** key-agreement key: the X25519 twin of its
@@ -218,9 +218,9 @@ surfaced as itself.
 #### Audiences
 
 An audience is one plaintext collection in another user's Space that this user
-has been granted a GET and HEAD zcap on. The zcap comes from the subscription
-agent's API rather than from a wallet login, so it is read through an
-`AudienceReader` opened on the zcap directly, with the app's own signer:
+has been granted a GET zcap on. The zcap comes from the subscription agent's API
+rather than from a wallet login, so it is read through an `AudienceReader`
+opened on the zcap directly, with the app's own signer:
 
 ```ts
 import { AudienceReader } from '@interop/pws-react'
@@ -368,9 +368,14 @@ visibility. Declare the queryable content attributes in the collection config:
   indexes: ['author', 'inReplyTo'] }
 ```
 
-The sync bootstrap announces the declaration (the server rejects filters on
-undeclared attributes fail-closed), and the entity store's `query` verb runs the
-query:
+The server rejects filters on undeclared attributes fail-closed, so the indexes
+have to be declared on the collection. Declaring is a Collection Metadata write,
+which needs a grant on the Space URL. The app's Collection-scoped grant cannot
+make it, so the Space controller (the wallet) declares them. The sync bootstrap
+checks the declaration against the config and writes nothing when every
+configured index is in it. When one is missing, the bootstrap's attempt is
+refused with `SpaceGrantRequiredError` and logs a warning, and the collection
+keeps replicating. The entity store's `query` verb runs the query:
 
 ```ts
 const page = await usePosts.getState().query({
@@ -404,16 +409,26 @@ the provisioner for it:
 await provisionDevGrants({
   baseServerUrl: 'http://localhost:3002/',
   seed: mySeedBytes,
-  collections: [{ id: 'notes', visibility: 'private', blindedIndex: true }]
+  collections: [
+    {
+      id: 'notes',
+      visibility: 'private',
+      blindedIndex: true,
+      indexes: ['author']
+    }
+  ]
 })
 ```
 
-The sync bootstrap then declares the attributes in the collection's own
-encrypted metadata, so every recipient of the collection discovers what is
-queryable without out-of-band coordination. Only attributes not already declared
-are written, so a returning session declares nothing. A collection provisioned
-without the key is warned about and keeps replicating in full; only its queries
-are unavailable.
+The attributes are declared in the collection's own encrypted metadata, so every
+recipient of the collection discovers what is queryable without out-of-band
+coordination. As on a public collection, that write needs a grant on the Space
+URL, so the wallet makes it. In dev, the provisioner declares the `indexes` it
+is given, on a public collection too. The sync bootstrap reads the persisted
+schema first and writes nothing when every configured attribute is in it. A
+missing attribute draws a refused attempt and a warning. A collection
+provisioned without the key is warned about and keeps replicating in full; only
+its queries are unavailable.
 
 The bootstrap also installs that persisted schema on the collection's own
 document cipher, so documents this app writes carry the same blinded index
@@ -686,10 +701,12 @@ cross-identity delegation, as in the real wallet-to-requester flow), every
 private collection is log-governed from its first epoch, and a per-collection RW
 zcap is delegated to the app DID derived from `seed`. The grants live seven days
 (`DEV_GRANT_TTL_MS`); the `expires` option of the `provisionDevGrants` call sets
-another lifetime (the example CLI exposes no flag for it). The server URL must
-be one did:webvh accepts: `https://`, or `http://` on the literal host
-`localhost`. Pass `--probe` (or `probe: true`) to check whether the delegated
-zcap authorizes PUTting the Collection Metadata object.
+another lifetime (the example CLI exposes no flag for it). A collection entry's
+`indexes` are declared by the provisioner as the Space controller, since the
+app's grants cannot declare them. The server URL must be one did:webvh accepts:
+`https://`, or `http://` on the literal host `localhost`. Pass `--probe` (or
+`probe: true`) to check whether the delegated zcap authorizes PUTting the
+Collection Metadata object.
 
 ## Testing
 

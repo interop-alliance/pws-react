@@ -78,7 +78,7 @@ describe('the request half, against wallet-core', () => {
     expect(parsed?.capabilityQueries).toEqual([
       {
         referenceId: 'notes',
-        allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+        allowedAction: ['GET', 'POST', 'PUT', 'DELETE'],
         invocationTarget: {
           type: 'https://w3id.org/byoe#private-collection',
           name: 'notes'
@@ -86,7 +86,7 @@ describe('the request half, against wallet-core', () => {
       },
       {
         referenceId: 'microblog-posts',
-        allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+        allowedAction: ['GET', 'POST', 'PUT', 'DELETE'],
         invocationTarget: {
           type: 'https://w3id.org/byoe#public-collection',
           name: 'microblog-posts'
@@ -94,7 +94,7 @@ describe('the request half, against wallet-core', () => {
       },
       {
         referenceId: 'private-credentials',
-        allowedAction: ['GET', 'HEAD'],
+        allowedAction: ['GET'],
         invocationTarget: {
           type: 'https://w3id.org/byoe#shared-wallet-collection',
           name: 'private-credentials'
@@ -165,7 +165,7 @@ describe('the credential half, against wallet-core', () => {
       controller: subjectDid,
       parentCapability: rootCapabilityId('https://was.example/space/s1/'),
       invocationTarget: 'https://was.example/space/s1/notes',
-      allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+      allowedAction: ['GET', 'POST', 'PUT', 'DELETE'],
       expires: new Date(Date.now() + 86_400_000).toISOString()
     } as unknown as IZcap
 
@@ -263,7 +263,7 @@ describe('the credential half, against wallet-core', () => {
       controller: annexDid,
       parentCapability: spaceRootId,
       invocationTarget: `${spaceUrl}/`,
-      allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+      allowedAction: ['GET', 'POST', 'PUT', 'DELETE'],
       expires: delegationExpires
     }
 
@@ -290,7 +290,7 @@ describe('the credential half, against wallet-core', () => {
         proofValue: `z${'1'.repeat(86)}`
       },
       invocationTarget: `${spaceUrl}/notes`,
-      allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+      allowedAction: ['GET', 'POST', 'PUT', 'DELETE'],
       expires: grantExpires
     } as unknown as IZcap
 

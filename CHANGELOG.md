@@ -1,5 +1,30 @@
 # @interop/pws-react Changelog
 
+## 0.34.0 - TBD
+
+### Changed
+
+- Breaking: the action vocabulary is four tokens. `RW_ACTIONS` is now
+  `['GET', 'POST', 'PUT', 'DELETE']` and `SHARED_ACTIONS` is `['GET']`. A
+  collection config whose `actions` name `HEAD` now throws at request-build
+  time. `GET` covers HEAD requests.
+- Breaking: the client is now `@interop/pws-client` 0.111.0, which refuses a
+  Collection Metadata write under a Collection-scoped grant
+  (`SpaceGrantRequiredError`).
+- Breaking: the sync bootstrap no longer declares an app's indexes. The Space
+  controller (the wallet) declares them, and the bootstrap warns when a
+  configured index is missing.
+- A public collection's stored indexes count as declared when they hold every
+  configured index, in any order.
+- `DeclarationResult` carries `errorName`, the caught error's `name`.
+
+### Added
+
+- `provisionDevGrants` takes `indexes` on a collection entry and declares them
+  as the Space controller.
+- `SPACE_GRANT_REQUIRED`, the `errorName` of a declaration refused under a
+  Collection-scoped grant.
+
 ## 0.33.0 - 2026-10-30
 
 ### Changed

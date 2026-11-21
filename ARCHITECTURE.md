@@ -558,10 +558,10 @@ Each request stays within the allowed actions of the descriptor class it uses
 (the spec's normative "Allowed actions" table). Both collection classes --
 `https://w3id.org/byoe#private-collection` and
 `https://w3id.org/byoe#public-collection` -- allow the full vocabulary
-`GET, HEAD, POST, PUT, DELETE` (`RW_ACTIONS`, in table order), since published
-content is still the application's own data and un-publishing and revision are
-data management like any other write. A share is read-only (`SHARED_ACTIONS`,
-`GET` and `HEAD`).
+`GET, POST, PUT, DELETE` (`RW_ACTIONS`, in table order), since published content
+is still the application's own data and un-publishing and revision are data
+management like any other write. A share is read-only (`SHARED_ACTIONS`, `GET`).
+A HEAD request's invocation names `GET`, so `GET` also permits HEAD.
 
 The exported helper is named `actionCeiling(visibility)`; read "ceiling" as
 local shorthand for the class's allowed-actions row. A configured action set
@@ -720,20 +720,20 @@ future reads but cannot take back what has already been read.
 
 An audience is a fourth kind of collection from the reader's side, and it gets a
 reader of its own (`src/storage/audienceReader.ts`). It is one plaintext
-collection in another owner's Space, and membership is a GET and HEAD zcap on
-that collection's container. A subscriber holds one `AudienceReader` per
-audience and merges what the readers return by the app's own stable post id,
-which lives in the post body. The resource id is not a stable identity: a post
-that changes audience moves.
+collection in another owner's Space, and membership is a GET zcap on that
+collection's container. A subscriber holds one `AudienceReader` per audience and
+merges what the readers return by the app's own stable post id, which lives in
+the post body. The resource id is not a stable identity: a post that changes
+audience moves.
 
 The reader is not a `SharedCollectionReader`, and the two are deliberately not
 one. A shared collection is encrypted, so that reader requires an `encryption`
 descriptor and builds a cipher from it; an audience is plaintext. A shared
 collection's fast path walks the POST form of the `changes` feed, which a GET
-and HEAD grant does not reach; the audience reader reads the read-only GET form.
-And a shared collection is resolved through the session's `PwsRemoteStore`,
-which holds the one Space the app's own grants name; an audience lives in
-another owner's Space, possibly on another host, so
+grant does not reach; the audience reader reads the read-only GET form. And a
+shared collection is resolved through the session's `PwsRemoteStore`, which
+holds the one Space the app's own grants name; an audience lives in another
+owner's Space, possibly on another host, so
 `AudienceReader.open({ zcap, signer })` takes the zcap directly and builds its
 client on the Space the zcap's chain is rooted in (`spaceUrlOf`, through
 `PwsClient.forSpace`, which holds a Space URL and nothing above it, so a Space
@@ -910,23 +910,37 @@ declares a collection encrypted from this side: the governing log's genesis is
 what declares it, written by whoever provisions the collection, and a private
 collection with no governing log stays fail-closed.
 
-Every collection that configures equality `indexes` then declares them, and
-where the declaration lives still depends on visibility. A public collection's
-declaration goes on the same object's plaintext `plaintext.indexes` member,
-through pws-client's `Collection.configure`. It merges the change over the
-object already read, carries `name`, `custom`, and every member this client does
-not model forward, and pins the write to the read's validator. A lost race is
-re-read and rebased by pws-client's own compare-and-swap; only a race lost
-repeatedly is reported here, and the next session's pass repairs it. The
-declaration is skipped once the stored declaration already matches the
-configured list. A private collection declares its indexes as blinded-index
-attributes inside the object's encrypted `custom` envelope instead, through a
-compare-and-swap write (`declareBlindedIndexes`, over pws-client's
-`Collection.declareIndexes`, one write for every missing attribute). The
-encrypted form is what lets every recipient discover what is queryable while the
-server never learns the attribute names. Only attributes missing from the
-persisted schema are written, so a returning session writes nothing, and the
-declaration reports whether it actually wrote.
+Every collection that configures equality `indexes` then has them checked, and
+where the declaration lives still depends on visibility. Declaring is a
+Collection Metadata write. The server admits it only under a root invocation or
+a grant on the Space URL, and the app holds Collection-scoped grants. So the
+Space controller (the wallet) declares the indexes, and the bootstrap finds them
+in place and writes nothing. Where they are missing, the bootstrap still makes a
+best-effort attempt. pws-client refuses it before any request is sent
+(`SpaceGrantRequiredError`), the result carries that `errorName`, and the
+bootstrap warns that the Collection grant cannot declare indexes and the wallet
+has to. A login yields Collection-scoped grants only (`parseGrants` rejects a
+Space-scoped one), so a session never holds a grant that could make the write.
+The dev provisioner declares the `indexes` it is given, as the Space controller.
+A public collection's declaration goes on the same object's plaintext
+`plaintext.indexes` member, through pws-client's `Collection.configure`. It
+merges the change over the object already read, carries `name`, `custom`, and
+every member this client does not model forward, and pins the write to the
+read's validator. A lost race is re-read and rebased by pws-client's own
+compare-and-swap; only a race lost repeatedly is reported here, and the next
+session's pass repairs it. The declaration is skipped once the stored list holds
+every configured index. The stored list may hold more entries, in any order, and
+a write adds the missing ones and keeps the rest. A private collection declares
+its indexes as blinded-index attributes inside the object's encrypted `custom`
+envelope instead, through a compare-and-swap write (`declareBlindedIndexes`,
+over pws-client's `Collection.declareIndexes`, one write for every missing
+attribute). The encrypted form is what lets every recipient discover what is
+queryable while the server never learns the attribute names. Only attributes
+missing from the persisted schema are written, so a returning session writes
+nothing, and the declaration reports whether it actually wrote. The persisted
+schema is read (`Collection.indexes()`, a read the grant covers) before any
+write is attempted, so a collection the wallet already declared draws no
+refusal.
 
 The persisted blinded-index schema is then installed on that collection's own
 document cipher (`LocalStore.applyCollectionMeta`, over the upstream cipher's
@@ -950,10 +964,9 @@ two non-answers apart as the Metadata read described below: not-found and a
 backend without metadata support mean "no schema", while any other failure is
 thrown, which the bootstrap warns about and skips the install for that session.
 
-The blinded-index declaration is the one write a private collection takes in a
-pass, and it reads the object fresh for its own compare-and-swap rather than
-trusting the copy the pass read, so it is never caught out by a write that
-landed first.
+The blinded-index declaration is the one write a private collection attempts in
+a pass, and it reads the schema fresh rather than trusting the copy the pass
+read, so it is never caught out by a write that landed first.
 
 The remote store is built with this app's identity keys when they are available,
 which is what lets the client's EDV keystore construct the codec the

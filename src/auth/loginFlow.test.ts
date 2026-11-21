@@ -98,7 +98,7 @@ beforeEach(() => {
  */
 function grantFor(
   collectionId: string,
-  actions: string[] = ['GET', 'HEAD', 'PUT', 'POST', 'DELETE']
+  actions: string[] = ['GET', 'PUT', 'POST', 'DELETE']
 ): IZcap {
   return {
     '@context': 'https://w3id.org/zcap/v1',
@@ -332,8 +332,8 @@ describe('App Connect grant checking', () => {
       expect(
         appConnect.capabilityQuery.map(entry => entry.allowedAction)
       ).toEqual([
-        ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
-        ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
+        ['GET', 'POST', 'PUT', 'DELETE'],
+        ['GET', 'POST', 'PUT', 'DELETE']
       ])
       return walletVp({
         challenge: vpr.challenge as string,

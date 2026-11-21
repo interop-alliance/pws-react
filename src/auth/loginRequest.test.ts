@@ -151,7 +151,7 @@ describe('buildAppConnectVpr', () => {
     const vpr = buildAppConnectVpr({
       ...BASE,
       collections: [{ id: 'microblog-posts', visibility: 'public' }],
-      actions: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE']
+      actions: ['GET', 'PUT', 'POST', 'DELETE']
     })
     const capabilityQuery = capabilityQueriesOf(vpr)
     expect(capabilityQuery[0]?.allowedAction).toEqual(RW_ACTIONS)
@@ -203,11 +203,11 @@ describe('buildAppConnectVpr', () => {
     const vpr = buildAppConnectVpr({
       ...BASE,
       collections: [{ id: 'notes' }],
-      actions: ['GET', 'HEAD']
+      actions: ['GET']
     })
     const capabilityQuery = capabilityQueriesOf(vpr)
     expect(capabilityQuery).toHaveLength(1)
-    expect(capabilityQuery[0]?.allowedAction).toEqual(['GET', 'HEAD'])
+    expect(capabilityQuery[0]?.allowedAction).toEqual(['GET'])
   })
 
   it('emits an empty capabilityQuery when no collections are requested', () => {
@@ -247,7 +247,7 @@ describe('buildAppConnectVpr', () => {
       ])
       // Read-only by construction: a custom RW action set never reaches a
       // share.
-      expect(SHARED_ACTIONS).toEqual(['GET', 'HEAD'])
+      expect(SHARED_ACTIONS).toEqual(['GET'])
     }
   )
 
@@ -256,7 +256,7 @@ describe('buildAppConnectVpr', () => {
       ...BASE,
       collections: [{ id: 'notes' }],
       sharedCollections: ['contacts'],
-      actions: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE']
+      actions: ['GET', 'PUT', 'POST', 'DELETE']
     })
     const capabilityQuery = capabilityQueriesOf(vpr)
     expect(capabilityQuery[0]?.allowedAction).toEqual(RW_ACTIONS)

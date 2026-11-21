@@ -31,9 +31,13 @@
  *      capability (now controlled by the did:webvh) to the app's controller
  *      DID, signed under the did:webvh verification method of the provisioner
  *      key;
- *   7. returns the signed grants and (optionally) writes them to a JSON file
+ *   7. declares each collection's `indexes` as the Space controller, on a
+ *      public collection's `plaintext.indexes` and in a private collection's
+ *      blinded-index schema. An app's Collection-scoped grant cannot make
+ *      that write, so the provisioner stands in for the wallet here too;
+ *   8. returns the signed grants and (optionally) writes them to a JSON file
  *      the app loads in dev-sync mode;
- *   8. optionally probes whether the delegated, collection-scoped RW zcap
+ *   9. optionally probes whether the delegated, collection-scoped RW zcap
  *      authorizes an app-side PUT of the Collection Metadata object (the
  *      `meta` sub-resource).
  *
@@ -45,7 +49,11 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { PwsClient, type ActionInput } from '@interop/pws-client'
-import { ensureFirstEpoch, ownerRecipient } from '@interop/pws-client/edv'
+import {
+  createEdvEncryption,
+  ensureFirstEpoch,
+  ownerRecipient
+} from '@interop/pws-client/edv'
 import type { IDelegatedZcap } from '@interop/data-integrity-core'
 import { CapabilityAgent } from '@interop/capability-agent'
 import { agentsFromKeyAgent } from '@interop/pws-client/identity'
@@ -78,6 +86,7 @@ import {
 } from '@interop/wallet-core/keys'
 import { deriveIdentity } from '../identity/agents.js'
 import { RW_ACTIONS } from '../auth/loginRequest.js'
+import { blindedAttribute } from '../storage/pwsRemoteStore.js'
 
 /**
  * A fixed, distinct default provisioner seed -- the "wallet" that owns the dev
@@ -149,12 +158,16 @@ export interface ProvisionDevGrantsResult {
  *   app DID the grants are delegated to is derived from it
  * @param options.collections {Array<string | object>}   the PWS collections to
  *   create and grant: a bare id string (private by default) or
- *   `{ id, visibility, blindedIndex }`. A private collection is log-governed:
+ *   `{ id, visibility, blindedIndex, indexes }`. A private collection is log-governed:
  *   its epoch[0] (sole recipient: the app's identity key-agreement key) is
  *   the genesis of its `meta/log`; a public one stays plaintext. `blindedIndex: true`
  *   additionally installs the collection's blinded-index key with that first
  *   epoch, which is the only moment it can be installed; it is ignored with a
- *   warning on a public collection, which is plaintext and needs no blinding
+ *   warning on a public collection, which is plaintext and needs no blinding.
+ *   `indexes` lists the equality-queryable content attributes, the same list
+ *   the app's collection config carries. The provisioner declares them as the
+ *   Space controller. On a private collection they need `blindedIndex: true`
+ *   and are skipped with a warning without it
  * @param [options.spaceName] {string}   human-readable Space name (defaults to
  *   `'Dev Space'`)
  * @param [options.outFile] {string}   when given, the `{ grants }` JSON is
@@ -185,8 +198,7 @@ export async function provisionDevGrants({
   outFile,
   provisionerSeed = DEFAULT_PROVISIONER_SEED,
   identityHandle,
-  // The server accepts HEAD even though storage-core's ActionInput union omits
-  // it, hence the assertion.
+  // RW_ACTIONS is a plain string array, hence the assertion.
   actions = RW_ACTIONS as ActionInput[],
   expires = new Date(Date.now() + DEV_GRANT_TTL_MS),
   probe = false,
@@ -200,6 +212,7 @@ export async function provisionDevGrants({
         id: string
         visibility?: 'private' | 'public'
         blindedIndex?: boolean
+        indexes?: string[]
       }
   >
   spaceName?: string
@@ -212,7 +225,12 @@ export async function provisionDevGrants({
   log?: (message: string) => void
 }): Promise<ProvisionDevGrantsResult> {
   const [
-    { controllerDid: appDid, zcapClient: appZcapClient, keyAgreementKey },
+    {
+      controllerDid: appDid,
+      zcapClient: appZcapClient,
+      keyAgreementKey,
+      keyResolver
+    },
     keyAgent
   ] = await Promise.all([
     deriveIdentity({ seed, identityHandle }),
@@ -265,9 +283,10 @@ export async function provisionDevGrants({
     const {
       id,
       visibility = 'private',
-      blindedIndex = false
+      blindedIndex = false,
+      indexes = []
     } = typeof entry === 'string' ? { id: entry } : entry
-    return { id, visibility, blindedIndex }
+    return { id, visibility, blindedIndex, indexes }
   })
   await Promise.all([
     ensureSpaceAndCollection({
@@ -359,9 +378,15 @@ export async function provisionDevGrants({
   // collection container URL (canonical trailing slash) then prefix-covers
   // everything the app invokes under it: its resources, the `query`
   // endpoint, the listing, and its Metadata object at `meta`.
+  // The app's identity key is the sole recipient of every private
+  // collection's epoch, so the provisioner seals the blinded-index schema
+  // with it. A real wallet is a recipient in its own right.
   const owner = new PwsClient({
     baseServerUrl,
-    zcapClient: webvhZcapClient({ keyAgent, did })
+    zcapClient: webvhZcapClient({ keyAgent, did }),
+    encryption: createEdvEncryption({
+      resolveKeys: async () => ({ keyAgreementKey, keyResolver })
+    })
   })
   const spaceRoot = rootCapability({ target: spaceUrl, controller: did })
 
@@ -378,6 +403,32 @@ export async function provisionDevGrants({
       })
       log(`  collection "${id}": created (${visibility}) + delegated RW to app`)
       return zcap
+    })
+  )
+
+  // The index declarations, as root invocations by the Space controller.
+  // They are Collection Metadata writes, which the app's Collection-scoped
+  // grants cannot make.
+  const ownerSpace = owner.spaceAt(spaceUrl)
+  await Promise.all(
+    entries.map(async ({ id, visibility, blindedIndex, indexes }) => {
+      if (indexes.length === 0) {
+        return
+      }
+      if (visibility === 'public') {
+        await ownerSpace.collection(id).configure({ plaintext: { indexes } })
+      } else if (blindedIndex) {
+        await ownerSpace.collection(id).declareIndexes({
+          indexes: indexes.map(name => ({ attribute: blindedAttribute(name) }))
+        })
+      } else {
+        log(
+          `  collection "${id}": skipping indexes on a private collection ` +
+            `provisioned without blindedIndex -- there is no blinding key`
+        )
+        return
+      }
+      log(`  collection "${id}": declared indexes ${indexes.join(', ')}`)
     })
   )
 
